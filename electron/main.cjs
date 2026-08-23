@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require('electron')
 const { spawn } = require('child_process')
 const { createHash } = require('crypto')
 const { existsSync, mkdirSync } = require('fs')
@@ -88,8 +88,88 @@ function chatHistoryFile() {
   return path.join(directory, `${key}.json`)
 }
 
+function projectStorageKey() {
+  if (!projectRoot) throw new Error('ยังไม่ได้เปิดโปรเจกต์')
+  const identity = process.platform === 'win32' ? projectRoot.toLowerCase() : projectRoot
+  return createHash('sha256').update(identity).digest('hex')
+}
+
+function undoDirectory() {
+  const directory = path.join(app.getPath('userData'), 'undo-history', projectStorageKey())
+  mkdirSync(directory, { recursive: true })
+  return directory
+}
+
+async function collectProjectFiles(directory = projectRoot, depth = 0, result = []) {
+  if (depth > 20) throw new Error('โครงสร้างโฟลเดอร์ลึกเกินไปสำหรับระบบย้อนกลับ')
+  const entries = await fs.readdir(directory, { withFileTypes: true })
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue
+    if (entry.isDirectory() && ignored.has(entry.name)) continue
+    const fullPath = path.join(directory, entry.name)
+    if (entry.isDirectory()) await collectProjectFiles(fullPath, depth + 1, result)
+    else if (entry.isFile()) result.push({ fullPath, relative: path.relative(projectRoot, fullPath) })
+  }
+  return result
+}
+
+async function createUndoSnapshot(label = '') {
+  const files = await collectProjectFiles()
+  if (files.length > 10000) throw new Error('โปรเจกต์มีไฟล์มากเกินไปสำหรับระบบย้อนกลับ')
+  let totalSize = 0
+  for (const file of files) {
+    const stat = await fs.stat(file.fullPath)
+    totalSize += stat.size
+  }
+  if (totalSize > 250 * 1024 * 1024) throw new Error('โปรเจกต์มีขนาดเกิน 250 MB ไม่สามารถสร้างจุดย้อนกลับได้')
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  const directory = path.join(undoDirectory(), id)
+  const backupRoot = path.join(directory, 'files')
+  for (const file of files) {
+    const destination = path.join(backupRoot, file.relative)
+    await fs.mkdir(path.dirname(destination), { recursive: true })
+    await fs.copyFile(file.fullPath, destination)
+  }
+  const manifest = { id, label: String(label).slice(0, 300), createdAt: new Date().toISOString(), files: files.map(file => file.relative) }
+  await fs.writeFile(path.join(directory, 'manifest.json'), JSON.stringify(manifest), 'utf8')
+  const snapshots = (await fs.readdir(undoDirectory(), { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort().reverse()
+  for (const expired of snapshots.slice(10)) await fs.rm(path.join(undoDirectory(), expired), { recursive: true, force: true })
+  return manifest
+}
+
+async function listUndoSnapshots() {
+  const directory = undoDirectory()
+  const entries = (await fs.readdir(directory, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort().reverse()
+  const result = []
+  for (const id of entries.slice(0, 10)) {
+    try {
+      result.push(JSON.parse(await fs.readFile(path.join(directory, id, 'manifest.json'), 'utf8')))
+    } catch {}
+  }
+  return result
+}
+
+async function restoreUndoSnapshot(id) {
+  if (!/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new Error('จุดย้อนกลับไม่ถูกต้อง')
+  const directory = path.join(undoDirectory(), id)
+  const backupRoot = path.join(directory, 'files')
+  const manifest = JSON.parse(await fs.readFile(path.join(directory, 'manifest.json'), 'utf8'))
+  const savedFiles = new Set(manifest.files.filter(relative => relative && !path.isAbsolute(relative) && !relative.startsWith('..')))
+  const currentFiles = await collectProjectFiles()
+  for (const file of currentFiles) {
+    if (!savedFiles.has(file.relative)) await fs.rm(safePath(file.fullPath), { force: true })
+  }
+  for (const relative of savedFiles) {
+    const destination = safePath(path.join(projectRoot, relative))
+    await fs.mkdir(path.dirname(destination), { recursive: true })
+    await fs.copyFile(path.join(backupRoot, relative), destination)
+  }
+  await fs.rm(directory, { recursive: true, force: true })
+  return true
+}
+
 function normalizeHistory(payload = {}) {
-  const allowedKinds = new Set(['user', 'agent_message', 'output', 'error'])
+  const allowedKinds = new Set(['user', 'agent_message', 'output', 'error', 'system'])
   const events = Array.isArray(payload.events) ? payload.events.slice(-300).flatMap(event => {
     if (!event || !allowedKinds.has(event.kind) || typeof event.text !== 'string') return []
     return [{ id: typeof event.id === 'string' ? event.id : undefined, kind: event.kind, text: event.text.slice(0, 100000) }]
@@ -230,6 +310,9 @@ ipcMain.handle('history:clear', async () => {
   await fs.rm(chatHistoryFile(), { force: true })
   return true
 })
+ipcMain.handle('undo:create', async (_, label) => createUndoSnapshot(label))
+ipcMain.handle('undo:list', async () => listUndoSnapshots())
+ipcMain.handle('undo:restore', async (_, id) => restoreUndoSnapshot(id))
 ipcMain.handle('git:diff', async () => {
   if (!projectRoot) throw new Error('ยังไม่ได้เปิดโปรเจกต์')
   const check = await run('git', ['rev-parse', '--is-inside-work-tree'], projectRoot)
@@ -274,6 +357,12 @@ ipcMain.handle('auth:start', async (_, mode = 'browser') => {
   })
   return true
 })
+ipcMain.handle('auth:logout', async () => {
+  if (codexProcess && !codexProcess.killed) throw new Error('กรุณาหยุดงาน Codex ก่อนออกจากระบบ')
+  const result = await runCodex(['logout'], app.getPath('home'))
+  if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
+  return true
+})
 ipcMain.handle('app:open-external', async (_, input) => {
   const url = new URL(input)
   const allowed = url.protocol === 'https:' && (url.hostname === 'chatgpt.com' || url.hostname.endsWith('.openai.com'))
@@ -285,6 +374,10 @@ ipcMain.handle('app:open-link', async (_, input) => {
   const url = new URL(input)
   if (url.protocol !== 'https:') throw new Error('เปิดได้เฉพาะลิงก์ HTTPS')
   await shell.openExternal(url.toString())
+  return true
+})
+ipcMain.handle('clipboard:write', (_, input) => {
+  clipboard.writeText(String(input).slice(0, 1000000))
   return true
 })
 ipcMain.handle('update:state', () => updateState)

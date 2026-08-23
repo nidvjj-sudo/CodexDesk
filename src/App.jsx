@@ -3,9 +3,27 @@ import Editor from '@monaco-editor/react'
 import { motion, AnimatePresence } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Copy, Download, ExternalLink, File, Folder, FolderOpen, GitCompare, ListTodo, LogIn, RefreshCw, Save, Send, Settings2, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, ListTodo, LogIn, LogOut, RefreshCw, Save, Send, ShieldCheck, Trash2, Undo2, X } from 'lucide-react'
 
 const api = window.codexDesk
+const CHAT_COMMANDS = [
+  { name: '/help', description: 'ดูคำสั่งทั้งหมด' },
+  { name: '/new', description: 'เริ่มแชทใหม่ในโฟลเดอร์นี้' },
+  { name: '/status', description: 'ดูสถานะโปรเจกต์และ Codex' },
+  { name: '/diff', description: 'เปิด Git Diff' },
+  { name: '/files', description: 'เปิดรายการไฟล์' },
+  { name: '/code', description: 'เปิดตัวแก้ไขโค้ด' },
+  { name: '/activity', description: 'เปิดกิจกรรมแบบละเอียด' },
+  { name: '/readonly', description: 'เปลี่ยนเป็นโหมดอ่านอย่างเดียว' },
+  { name: '/write', description: 'อนุญาตให้แก้ไขไฟล์' },
+  { name: '/approval', description: 'ตั้งค่า ask หรือ auto' },
+  { name: '/update', description: 'ตรวจอัปเดตแอป' },
+  { name: '/copy', description: 'คัดลอกแชททั้งหมด' },
+  { name: '/undo', description: 'ย้อนกลับงานล่าสุด' },
+  { name: '/login', description: 'เปิดหน้าบัญชี ChatGPT' },
+  { name: '/logout', description: 'ออกจากระบบ ChatGPT' },
+  { name: '/stop', description: 'หยุดงานและล้างคิว' }
+]
 
 function FileNode({ node, onOpen, level = 0 }) {
   const [open, setOpen] = useState(level < 1)
@@ -29,6 +47,28 @@ function MarkdownMessage({ text }) {
       a: ({ href, children }) => <button className="markdown-link" onClick={() => href && api.openLink(href)}>{children}</button>
     }}
   >{text}</ReactMarkdown>
+}
+
+function diffStats(diff = '') {
+  let additions = 0
+  let deletions = 0
+  for (const line of String(diff).split(/\r?\n/)) {
+    if (line.startsWith('+++') || line.startsWith('---')) continue
+    if (line.startsWith('+')) additions += 1
+    if (line.startsWith('-')) deletions += 1
+  }
+  return { additions, deletions }
+}
+
+function fileChangeDetails(item) {
+  return (Array.isArray(item.changes) ? item.changes : []).map(change => {
+    const stats = diffStats(change.diff || change.patch || '')
+    return {
+      path: change.path || change.file_path || 'ไฟล์',
+      kind: change.kind || 'update',
+      ...stats
+    }
+  })
 }
 
 function App() {
@@ -55,6 +95,7 @@ function App() {
   const [mobileView, setMobileView] = useState('chat')
   const [sessionId, setSessionId] = useState(null)
   const [historyReady, setHistoryReady] = useState(false)
+  const [undoStack, setUndoStack] = useState([])
   const codexBuffer = useRef('')
   const conversationEnd = useRef(null)
   const runningRef = useRef(false)
@@ -63,6 +104,11 @@ function App() {
   const sessionIdRef = useRef(null)
 
   const dirty = currentFile && content !== savedContent
+  const commandSuggestions = prompt.startsWith('/') && !prompt.includes('\n') ? CHAT_COMMANDS.filter(command => command.name.startsWith(prompt.split(/\s+/)[0].toLowerCase())).slice(0, 7) : []
+  const liveActivity = activity.slice().reverse().find(item => item.status === 'running') || activity.at(-1)
+  const currentTaskIndex = activity.map(item => item.type).lastIndexOf('task')
+  const currentTaskActivity = currentTaskIndex >= 0 ? activity.slice(currentTaskIndex) : activity
+  const liveStats = currentTaskActivity.reduce((total, item) => ({ additions: total.additions + (item.additions || 0), deletions: total.deletions + (item.deletions || 0) }), { additions: 0, deletions: 0 })
 
   useEffect(() => api.getProject().then(value => value && loadProject(value)), [])
 
@@ -173,8 +219,9 @@ function App() {
     setHistoryReady(false)
     setProject(value)
     setEvents([])
-    const [nextFiles, history] = await Promise.all([api.listFiles(), api.historyGet()])
+    const [nextFiles, history, undoHistory] = await Promise.all([api.listFiles(), api.historyGet(), api.undoList()])
     setFiles(nextFiles)
+    setUndoStack(undoHistory)
     sessionIdRef.current = history.sessionId || null
     setSessionId(history.sessionId || null)
     setEvents((history.events || []).map(event => ({ ...event, queued: false })))
@@ -257,13 +304,16 @@ function App() {
   function updateActivity(event) {
     const item = event.item
     const id = item.id || `${item.type}-${Date.now()}`
-    const labels = { reasoning: 'กำลังวิเคราะห์', file_change: 'กำลังแก้ไขไฟล์', command_execution: 'กำลังรันคำสั่ง', web_search: 'กำลังค้นหา', mcp_tool_call: 'กำลังใช้เครื่องมือ' }
-    const title = item.command || item.query || item.name || item.path || labels[item.type] || item.type
+    const labels = { reasoning: 'กำลังวิเคราะห์', file_change: 'กำลังแก้ไขไฟล์', fileChange: 'กำลังแก้ไขไฟล์', command_execution: 'กำลังรันคำสั่ง', commandExecution: 'กำลังรันคำสั่ง', web_search: 'กำลังค้นหา', webSearch: 'กำลังค้นหา', mcp_tool_call: 'กำลังใช้เครื่องมือ', mcpToolCall: 'กำลังใช้เครื่องมือ' }
+    const changes = ['file_change', 'fileChange'].includes(item.type) ? fileChangeDetails(item) : []
+    const additions = changes.reduce((total, change) => total + change.additions, 0)
+    const deletions = changes.reduce((total, change) => total + change.deletions, 0)
+    const title = changes.length > 0 ? `แก้ไข ${changes.length} ไฟล์` : item.command || item.query || item.name || item.path || labels[item.type] || item.type
     const output = item.aggregated_output || item.output || item.text || ''
     const status = event.type === 'item.started' ? 'running' : item.status || 'completed'
     setActivity(items => {
       const index = items.findIndex(value => value.id === id)
-      const next = { id, type: item.type, title: String(title), output: String(output).slice(-1200), status }
+      const next = { id, type: item.type, title: String(title), output: String(output).slice(-1200), status, changes, additions, deletions }
       if (index < 0) return [...items.slice(-99), next]
       return items.map((value, position) => position === index ? { ...value, ...next } : value)
     })
@@ -276,6 +326,10 @@ function App() {
     setActivity(items => [...items.slice(-99), { id: `task-${task.id}`, type: 'task', title: task.text, output: '', status: 'running' }])
     let completed = false
     try {
+      if (task.allowEdit) {
+        const snapshot = await api.undoCreate(task.text)
+        setUndoStack(items => [snapshot, ...items].slice(0, 10))
+      }
       const result = await api.codexRun({ prompt: task.text, allowEdit: task.allowEdit, sessionId: sessionIdRef.current })
       completed = result.code === 0
       await refreshFiles()
@@ -297,6 +351,11 @@ function App() {
   function sendPrompt() {
     const text = prompt.trim()
     if (!text || !project) return
+    if (text.startsWith('/')) {
+      setPrompt('')
+      void runChatCommand(text)
+      return
+    }
     if (allowEdit && approvalMode === 'ask' && !confirm('อนุญาตให้ Codex แก้ไขไฟล์และรันคำสั่งสำหรับงานนี้หรือไม่')) return
     const task = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text, allowEdit }
     setPrompt('')
@@ -307,6 +366,92 @@ function App() {
       return
     }
     void executeTask(task)
+  }
+
+  function addSystemMessage(text) {
+    setEvents(items => [...items, { id: `system-${Date.now()}`, kind: 'system', text }])
+  }
+
+  async function runChatCommand(input) {
+    const [name, ...args] = input.trim().split(/\s+/)
+    const command = name.toLowerCase()
+    if (command === '/help') {
+      addSystemMessage(`### คำสั่ง CodexDesk\n${CHAT_COMMANDS.map(item => `- \`${item.name}\` ${item.description}`).join('\n')}`)
+      return
+    }
+    if (command === '/new' || command === '/clear') {
+      await clearHistory()
+      return
+    }
+    if (command === '/status') {
+      addSystemMessage(`### สถานะ\n- โปรเจกต์: **${project?.name || 'ยังไม่ได้เปิด'}**\n- บัญชี: **${authenticated ? 'เชื่อมต่อแล้ว' : 'ยังไม่เชื่อมต่อ'}**\n- Codex: **${running ? 'กำลังทำงาน' : 'พร้อมใช้งาน'}**\n- คิว: **${queue.length}**\n- สิทธิ์: **${allowEdit ? 'แก้ไขไฟล์ได้' : 'อ่านอย่างเดียว'}**\n- การอนุมัติ: **${approvalMode === 'ask' ? 'ถามก่อน' : 'อัตโนมัติ'}**`)
+      return
+    }
+    if (command === '/diff') {
+      await loadDiff()
+      setMobileView('editor')
+      addSystemMessage('เปิด Git Diff แล้ว')
+      return
+    }
+    if (command === '/files') {
+      setMobileView('files')
+      return
+    }
+    if (command === '/code') {
+      setMobileView('editor')
+      return
+    }
+    if (command === '/activity') {
+      setActivityOpen(true)
+      return
+    }
+    if (command === '/readonly') {
+      setAllowEdit(false)
+      addSystemMessage('เปลี่ยนเป็นโหมดอ่านอย่างเดียวแล้ว')
+      return
+    }
+    if (command === '/write') {
+      setAllowEdit(true)
+      addSystemMessage('อนุญาตให้ Codex แก้ไขไฟล์แล้ว')
+      return
+    }
+    if (command === '/approval') {
+      const mode = args[0]?.toLowerCase()
+      if (!['ask', 'auto'].includes(mode)) {
+        addSystemMessage('ใช้ `/approval ask` หรือ `/approval auto`')
+        return
+      }
+      setApprovalMode(mode)
+      addSystemMessage(mode === 'ask' ? 'ตั้งเป็นถามก่อนเริ่มงานแล้ว' : 'ตั้งเป็นทำงานอัตโนมัติแล้ว')
+      return
+    }
+    if (command === '/update') {
+      await updateApp()
+      addSystemMessage('กำลังตรวจอัปเดต')
+      return
+    }
+    if (command === '/copy') {
+      await copyChat()
+      return
+    }
+    if (command === '/undo') {
+      await undoLastTask()
+      return
+    }
+    if (command === '/login') {
+      openAccount()
+      return
+    }
+    if (command === '/logout') {
+      await signOut()
+      return
+    }
+    if (command === '/stop') {
+      stopCodex()
+      addSystemMessage('หยุดงานและล้างคิวแล้ว')
+      return
+    }
+    addSystemMessage(`ไม่พบคำสั่ง \`${name}\` พิมพ์ \`/help\` เพื่อดูคำสั่งทั้งหมด`)
   }
 
   function stopCodex() {
@@ -322,6 +467,51 @@ function App() {
     setSessionId(null)
     setEvents([])
     setActivity([])
+  }
+
+  async function copyChat() {
+    const transcript = events.map(event => `${event.kind === 'user' ? 'คุณ' : event.kind === 'system' ? 'ระบบ' : 'Codex'}\n${event.text}`).join('\n\n')
+    await api.copyText(transcript)
+    addSystemMessage('คัดลอกแชททั้งหมดแล้ว')
+  }
+
+  async function undoLastTask() {
+    const snapshot = undoStack[0]
+    if (!snapshot || running) return
+    if (!confirm(`ย้อนกลับไฟล์ทั้งหมดไปก่อนงาน "${snapshot.label || 'ล่าสุด'}" หรือไม่`)) return
+    try {
+      await api.undoRestore(snapshot.id)
+      setUndoStack(await api.undoList())
+      await refreshFiles()
+      await loadDiff()
+      if (currentFile) {
+        try {
+          const restored = await api.readFile(currentFile.path)
+          setContent(restored)
+          setSavedContent(restored)
+        } catch {
+          setCurrentFile(null)
+          setContent('')
+          setSavedContent('')
+        }
+      }
+      addSystemMessage('ย้อนกลับไฟล์ไปก่อนงานล่าสุดแล้ว')
+    } catch (error) {
+      addSystemMessage(`ย้อนกลับไม่สำเร็จ: ${error.message}`)
+    }
+  }
+
+  async function signOut() {
+    if (!authenticated || running) return
+    if (!confirm('ออกจากระบบ ChatGPT ใน CodexDesk หรือไม่')) return
+    try {
+      await api.authLogout()
+      setAuthenticated(false)
+      setAuthOpen(false)
+      addSystemMessage('ออกจากระบบ ChatGPT แล้ว')
+    } catch (error) {
+      addSystemMessage(`ออกจากระบบไม่สำเร็จ: ${error.message}`)
+    }
   }
 
   const language = useMemo(() => {
@@ -347,8 +537,7 @@ function App() {
         <button className={`rail-button ${mobileView === 'chat' ? 'active' : ''}`} onClick={() => setMobileView('chat')} title="Codex"><Bot size={18} /></button>
         <button className="rail-button" onClick={() => { setMobileView('editor'); loadDiff() }} title="Git Diff"><GitCompare size={18} /></button>
         <div className="rail-spacer" />
-        <button className={`rail-button ${authenticated ? 'signed-in' : ''}`} onClick={openAccount}>{authenticated ? <Check size={18} /> : <LogIn size={18} />}</button>
-        <button className="rail-button"><Settings2 size={18} /></button>
+        <button className={`rail-button ${authenticated ? 'signed-in' : ''}`} onClick={openAccount} title={authenticated ? 'บัญชี ChatGPT' : 'เข้าสู่ระบบ ChatGPT'}>{authenticated ? <Check size={18} /> : <LogIn size={18} />}</button>
       </aside>
 
       <aside className="explorer">
@@ -372,20 +561,22 @@ function App() {
       </section>
 
       <aside className="agent-panel">
-        <div className="agent-heading"><div><Bot size={17} /><span>Codex</span></div><div className="agent-actions"><button className={activityOpen ? 'active' : ''} onClick={() => setActivityOpen(value => !value)} title="Ctrl ซ้าย + O"><ListTodo size={15} />กิจกรรม{queue.length > 0 && <b>{queue.length}</b>}</button><button disabled={!running} onClick={stopCodex}><CircleStop size={15} />หยุด</button></div></div>
+        <div className="agent-heading"><div><Bot size={17} /><span>Codex</span></div><div className="agent-actions"><button className="icon-action" disabled={events.length === 0} onClick={copyChat} title="คัดลอกแชททั้งหมด"><Copy size={14} /></button><button className="icon-action" disabled={running || undoStack.length === 0} onClick={undoLastTask} title="ย้อนกลับงานล่าสุด"><Undo2 size={14} /></button><button className={activityOpen ? 'active' : ''} onClick={() => setActivityOpen(value => !value)} title="Ctrl ซ้าย + O"><ListTodo size={15} />กิจกรรม{queue.length > 0 && <b>{queue.length}</b>}</button><button disabled={!running} onClick={stopCodex}><CircleStop size={15} />หยุด</button></div></div>
         <div className="agent-meta"><span>Local workspace</span><span>{allowEdit ? 'Workspace write' : 'Read only'}</span></div>
         <div className="conversation">
           {events.length === 0 && <div className="welcome"><div className="welcome-icon"><Bot size={22} /></div><h2>เริ่มสร้างด้วย Codex</h2><p>บอกสิ่งที่ต้องการแก้ไขในโปรเจกต์นี้</p></div>}
-          {events.map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><span>{event.kind === 'user' ? event.queued ? 'คุณ · อยู่ในคิว' : 'คุณ' : 'Codex'}</span><div className="markdown"><MarkdownMessage text={event.text} /></div></motion.div>)}
+          {events.map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><div className="message-label"><span>{event.kind === 'user' ? event.queued ? 'คุณ · อยู่ในคิว' : 'คุณ' : event.kind === 'system' ? 'ระบบ' : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title="คัดลอกข้อความ"><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage text={event.text} /></div></motion.div>)}
           {running && <div className="thinking"><i /><i /><i /></div>}
           <div ref={conversationEnd} className="conversation-end" />
         </div>
+        {running && <div className="live-status"><div><i /><span>{liveActivity?.title || 'กำลังเริ่มงาน'}</span></div>{(liveStats.additions > 0 || liveStats.deletions > 0) && <strong><b>+{liveStats.additions}</b><em>-{liveStats.deletions}</em></strong>}</div>}
         <AnimatePresence>{activityOpen && <motion.div className="activity-drawer" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
           <div className="activity-heading"><div><ListTodo size={15} /><span>กิจกรรมของ Codex</span></div><div className="activity-heading-actions"><kbd>Ctrl + O</kbd><button onClick={clearHistory} title="ล้างประวัติแชท"><Trash2 size={13} /></button></div></div>
           {queue.length > 0 && <div className="queue-section"><strong>คิวข้อความ {queue.length}</strong>{queue.map((task, index) => <div className="queue-item" key={task.id}><span>{index + 1}</span><p>{task.text}</p></div>)}</div>}
-          <div className="activity-list">{activity.length === 0 ? <div className="activity-empty">ยังไม่มีกิจกรรม</div> : activity.slice().reverse().map(item => <div className={`activity-item ${item.status}`} key={item.id}><i /><div><strong>{item.title}</strong>{item.output && <pre>{item.output}</pre>}</div></div>)}</div>
+          <div className="activity-list">{activity.length === 0 ? <div className="activity-empty">ยังไม่มีกิจกรรม</div> : activity.slice().reverse().map(item => <div className={`activity-item ${item.status}`} key={item.id}><i /><div><div className="activity-title"><strong>{item.title}</strong>{(item.additions > 0 || item.deletions > 0) && <span><b>+{item.additions}</b><em>-{item.deletions}</em></span>}</div>{item.changes?.length > 0 && <div className="file-change-list">{item.changes.map((change, index) => <div className="file-change-row" key={`${change.path}-${index}`}><FilePenLine size={12} /><span>{change.path}</span><b>+{change.additions}</b><em>-{change.deletions}</em></div>)}</div>}{item.output && <pre>{item.output}</pre>}</div></div>)}</div>
         </motion.div>}</AnimatePresence>
         <div className="composer">
+          {commandSuggestions.length > 0 && <div className="command-menu"><div className="command-menu-label"><Command size={12} />คำสั่ง</div>{commandSuggestions.map(command => <button key={command.name} onClick={() => setPrompt(command.name === '/approval' ? '/approval ' : command.name)}><code>{command.name}</code><span>{command.description}</span></button>)}</div>}
           <textarea value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendPrompt() } }} placeholder={project ? 'สั่งงาน Codex…' : 'เปิดโปรเจกต์ก่อน'} disabled={!project} />
           {queue.length > 0 && <div className="queue-indicator">มี {queue.length} ข้อความรอทำงาน</div>}
           <div className="composer-footer">
@@ -403,7 +594,7 @@ function App() {
         <button className="modal-close" onClick={() => setAuthOpen(false)}><X size={16} /></button>
         <div className={`auth-symbol ${authState}`}><LogIn size={21} /></div>
         <h2>{authState === 'success' ? 'เข้าสู่ระบบสำเร็จ' : authMode === 'browser' ? 'เข้าสู่ระบบด้วย ChatGPT' : 'เข้าสู่ระบบด้วยรหัสยืนยัน'}</h2>
-        {authState === 'success' ? <p>บัญชี ChatGPT พร้อมใช้งานกับ CodexDesk แล้ว</p> : <>
+        {authState === 'success' ? <><p>บัญชี ChatGPT พร้อมใช้งานกับ CodexDesk แล้ว</p><button className="auth-secondary logout-button" onClick={signOut} disabled={running}><LogOut size={14} />ออกจากระบบ</button></> : <>
           <p>{authMode === 'browser' ? 'เข้าสู่ระบบในเบราว์เซอร์ แล้วกลับมาที่ CodexDesk' : 'เปิดหน้าตรวจสอบและกรอกรหัสแบบใช้ครั้งเดียว'}</p>
           {authMode === 'device' && deviceCode && <button className="device-code" onClick={() => navigator.clipboard.writeText(deviceCode)}><strong>{deviceCode}</strong><Copy size={14} /></button>}
           {authUrl && authState === 'working' && <button className="auth-primary" onClick={() => api.openExternal(authUrl)}><ExternalLink size={15} />เปิดหน้าเข้าสู่ระบบ</button>}

@@ -71,7 +71,7 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .diff-heading button:hover { background: #18181a; color: #ddd; }
 .diff-view { height: calc(100% - 36px); margin: 0; padding: 11px 14px; overflow: auto; color: #b4b4b8; font: 10.5px/1.6 "Cascadia Mono", Consolas, monospace; white-space: pre; }
 
-.agent-panel { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-rows: 49px 30px minmax(0, 1fr) auto; border-left: 1px solid var(--line); background: #0c0c0d; }
+.agent-panel { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-rows: 49px 30px minmax(0, 1fr) auto auto; border-left: 1px solid var(--line); background: #0c0c0d; }
 .agent-heading { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line-soft); }
 .agent-heading > div, .agent-heading button { display: flex; align-items: center; gap: 7px; }
 .agent-heading > div:first-child { min-width: 0; font-size: 12.5px; font-weight: 650; }
@@ -79,6 +79,7 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .agent-heading button { height: 28px; padding: 0 8px; border: 1px solid #2c2c30; border-radius: 7px; background: #131315; color: #9b9ba1; font-size: 9px; cursor: pointer; transition: .15s ease; }
 .agent-heading button:hover:not(:disabled), .agent-heading button.active { border-color: #49494f; background: #1b1b1e; color: #ededf0; }
 .agent-heading button:disabled { opacity: .32; cursor: default; }
+.agent-heading button.icon-action { width: 28px; justify-content: center; padding: 0; }
 .agent-actions button b { min-width: 15px; height: 15px; display: grid; place-items: center; border-radius: 8px; background: #e5e5e7; color: #111; font-size: 8px; }
 .agent-meta { display: flex; align-items: center; justify-content: space-between; padding: 0 13px; border-bottom: 1px solid #19191b; color: #626268; font-size: 8.5px; }
 .conversation { min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 18px clamp(13px, 4%, 22px); }
@@ -88,11 +89,17 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .welcome h2 { margin: 0 0 6px; color: #d5d5d8; font-size: 14px; }
 .welcome p { margin: 0; font-size: 10.5px; }
 .message { min-width: 0; margin-bottom: 18px; }
-.message > span { display: block; margin-bottom: 6px; color: #69696f; font-size: 8px; font-weight: 600; letter-spacing: .75px; text-transform: uppercase; }
+.message-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.message-label > span { color: #69696f; font-size: 8px; font-weight: 600; letter-spacing: .75px; text-transform: uppercase; }
+.message-label button { width: 23px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #5f5f65; opacity: 0; cursor: pointer; }
+.message:hover .message-label button { opacity: 1; }
+.message-label button:hover { background: #1a1a1d; color: #ddd; }
 .message.user { width: fit-content; max-width: 92%; margin-left: auto; padding: 10px 12px; border: 1px solid #303034; border-radius: 12px 12px 3px 12px; background: linear-gradient(145deg, #19191c, #141416); box-shadow: 0 8px 22px #0003; }
-.message.user > span { color: #88888e; }
+.message.user .message-label > span { color: #88888e; }
 .message.user.queued { opacity: .62; border-style: dashed; }
 .message.error .markdown { padding-left: 9px; border-left: 2px solid #69696f; }
+.message.system { padding: 9px 11px; border: 1px solid #28282c; border-radius: 9px; background: #101012; }
+.message.system .message-label > span { color: #8d8d93; }
 .markdown { min-width: 0; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
@@ -119,9 +126,22 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .thinking i { width: 4px; height: 4px; border-radius: 50%; background: #aaa; animation: thinking 1.2s infinite; }
 .thinking i:nth-child(2) { animation-delay: .15s; }
 .thinking i:nth-child(3) { animation-delay: .3s; }
+.live-status { min-width: 0; min-height: 33px; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 clamp(10px, 3.5%, 18px) 8px; padding: 7px 10px; border: 1px solid #29292d; border-radius: 9px; background: #101012; }
+.live-status > div { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.live-status > div > i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: #eee; box-shadow: 0 0 0 3px #ffffff0d; animation: pulse 1.2s infinite; }
+.live-status > div > span { overflow: hidden; color: #aaaab0; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.live-status > strong, .activity-title > span { display: flex; align-items: center; gap: 6px; font: 600 9px "Cascadia Mono", Consolas, monospace; }
+.live-status b, .activity-title b, .file-change-row b { color: #8fd6a2; font-style: normal; }
+.live-status em, .activity-title em, .file-change-row em { color: #ee9b9b; font-style: normal; }
 
 .composer { min-height: 0; margin: 0 clamp(10px, 3.5%, 18px) clamp(10px, 3.5%, 18px); overflow: hidden; border: 1px solid #343439; border-radius: 13px; background: #121214e8; box-shadow: 0 14px 38px #0007, inset 0 1px #ffffff08; backdrop-filter: blur(12px); transition: .16s ease; }
 .composer:focus-within { border-color: #53535a; box-shadow: 0 16px 44px #0009, 0 0 0 1px #ffffff08; }
+.command-menu { max-height: 235px; overflow: auto; padding: 7px; border-bottom: 1px solid #29292d; background: #0e0e10; }
+.command-menu-label { display: flex; align-items: center; gap: 6px; padding: 4px 6px 7px; color: #707076; font-size: 8px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; }
+.command-menu > button { width: 100%; min-width: 0; display: grid; grid-template-columns: 86px minmax(0, 1fr); align-items: center; gap: 8px; padding: 7px 8px; border: 0; border-radius: 7px; background: transparent; color: #aaaab0; text-align: left; cursor: pointer; }
+.command-menu > button:hover { background: #1a1a1d; color: #eee; }
+.command-menu code { color: #e2e2e5; font: 10px "Cascadia Mono", Consolas, monospace; }
+.command-menu span { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .composer textarea { width: 100%; height: clamp(72px, 11vh, 105px); resize: none; padding: 12px 13px; border: 0; outline: 0; background: transparent; color: #e8e8eb; font-size: 11.5px; line-height: 1.55; }
 .composer textarea::placeholder { color: #5e5e64; }
 .queue-indicator { padding: 0 12px 7px; color: #77777d; font-size: 8.5px; }
@@ -153,6 +173,13 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .activity-item.running > i { background: #e8e8ea; box-shadow: 0 0 0 3px #ffffff0d; animation: pulse 1.2s infinite; }
 .activity-item.failed > i { background: #8d8d93; }
 .activity-item strong { display: block; color: #c9c9cd; font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
+.activity-title { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.activity-title > strong { min-width: 0; }
+.file-change-list { margin-top: 6px; overflow: hidden; border: 1px solid #29292d; border-radius: 7px; background: #0a0a0b; }
+.file-change-row { min-width: 0; display: grid; grid-template-columns: 15px minmax(0, 1fr) auto auto; align-items: center; gap: 6px; padding: 6px 7px; border-bottom: 1px solid #202023; color: #8c8c92; font-size: 8.5px; }
+.file-change-row:last-child { border-bottom: 0; }
+.file-change-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-change-row b, .file-change-row em { font: 600 8.5px "Cascadia Mono", Consolas, monospace; }
 .activity-item pre { max-height: 110px; margin: 5px 0 0; overflow: auto; color: #77777d; font: 8.5px/1.55 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; }
 .activity-empty { padding: 28px 0; color: #66666c; font-size: 9.5px; text-align: center; }
 
@@ -170,6 +197,8 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .auth-primary { height: 41px; border: 0; background: #ededf0; color: #111; font-size: 10.5px; font-weight: 600; }
 .auth-secondary { height: 37px; margin-top: 9px; border: 1px solid #313136; background: transparent; color: #99999f; font-size: 9.5px; }
 .auth-secondary:hover { border-color: #4a4a50; background: #171719; color: #ddd; }
+.logout-button { color: #c4c4c8; }
+.logout-button:disabled { opacity: .4; cursor: default; }
 .auth-loading { height: 60px; display: flex; align-items: center; justify-content: center; gap: 10px; color: #77777d; font-size: 10.5px; }
 .auth-loading i { width: 13px; height: 13px; border: 1px solid #55555b; border-top-color: #eee; border-radius: 50%; animation: spin .8s linear infinite; }
 .auth-error { max-height: 90px; overflow: auto; padding: 9px; border: 1px solid #29292d; border-radius: 8px; background: #09090a; color: #aaaab0; text-align: left; white-space: pre-wrap; font-size: 9px; }
