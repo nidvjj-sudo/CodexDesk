@@ -1,0 +1,44 @@
+{
+  "name": "codexdesk",
+  "version": "2.1.0",
+  "private": true,
+  "description": "Desktop workspace for OpenAI Codex CLI",
+  "repository": { "type": "git", "url": "https://github.com/nidvjj-sudo/CodexDesk.git" },
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "build:web": "vite build",
+    "verify": "node scripts/verify-runtime.cjs",
+    "build": "npm run verify && npm run build:web && electron-builder --win --x64",
+    "release": "npm run verify && npm run build:web && electron-builder --win --x64 --publish always",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@openai/codex": "0.143.0",
+    "electron-updater": "6.3.9",
+    "lucide-react": "^0.468.0",
+    "monaco-editor": "^0.52.2",
+    "motion": "^11.15.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "33.4.11",
+    "electron-builder": "^25.1.8",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.codexdesk.app",
+    "productName": "CodexDesk",
+    "asar": false,
+    "files": ["dist/**/*", "electron/**/*", "package.json"],
+    "directories": { "output": "release" },
+    "publish": { "provider": "github", "owner": "nidvjj-sudo", "repo": "CodexDesk", "releaseType": "release" },
+    "win": { "target": ["nsis"] },
+    "nsis": { "artifactName": "CodexDesk-Setup-${version}-${arch}.${ext}", "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true }
+  }
+}
