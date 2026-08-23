@@ -3,7 +3,7 @@ import Editor from '@monaco-editor/react'
 import { motion, AnimatePresence } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, ListTodo, LogIn, LogOut, RefreshCw, Save, Send, ShieldCheck, Trash2, Undo2, X } from 'lucide-react'
+import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, History, ListTodo, LogIn, LogOut, Plus, RefreshCw, Save, Send, ShieldCheck, Trash2, Undo2, X } from 'lucide-react'
 
 const api = window.codexDesk
 const CHAT_COMMANDS = [
@@ -89,12 +89,17 @@ function App() {
   const [authState, setAuthState] = useState('idle')
   const [authMode, setAuthMode] = useState('browser')
   const [updater, setUpdater] = useState({ status: 'idle', version: null, percent: 0 })
+  const [updateOpen, setUpdateOpen] = useState(false)
+  const [currentVersion, setCurrentVersion] = useState('')
   const [queue, setQueue] = useState([])
   const [activity, setActivity] = useState([])
   const [activityOpen, setActivityOpen] = useState(false)
   const [mobileView, setMobileView] = useState('chat')
   const [sessionId, setSessionId] = useState(null)
   const [historyReady, setHistoryReady] = useState(false)
+  const [conversationId, setConversationId] = useState(null)
+  const [conversations, setConversations] = useState([])
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [undoStack, setUndoStack] = useState([])
   const codexBuffer = useRef('')
   const conversationEnd = useRef(null)
@@ -110,7 +115,10 @@ function App() {
   const currentTaskActivity = currentTaskIndex >= 0 ? activity.slice(currentTaskIndex) : activity
   const liveStats = currentTaskActivity.reduce((total, item) => ({ additions: total.additions + (item.additions || 0), deletions: total.deletions + (item.deletions || 0) }), { additions: 0, deletions: 0 })
 
-  useEffect(() => api.getProject().then(value => value && loadProject(value)), [])
+  useEffect(() => {
+    api.getVersion().then(setCurrentVersion)
+    api.getProject().then(value => value && loadProject(value))
+  }, [])
 
   useEffect(() => {
     if (!project) return undefined
@@ -193,10 +201,13 @@ function App() {
   useEffect(() => {
     if (!project || !historyReady) return undefined
     const timeout = window.setTimeout(() => {
-      api.historySave({ events, sessionId }).catch(() => {})
+      api.historySave({ conversationId, events, sessionId }).then(saved => {
+        setConversationId(saved.conversationId)
+        return api.historyList()
+      }).then(setConversations).catch(() => {})
     }, 250)
     return () => window.clearTimeout(timeout)
-  }, [events, sessionId, project, historyReady])
+  }, [events, sessionId, conversationId, project, historyReady])
 
   async function startLogin(mode = 'browser') {
     setAuthOpen(true)
@@ -227,6 +238,11 @@ function App() {
     return api.updateCheck()
   }
 
+  function openUpdate() {
+    setUpdateOpen(true)
+    if (['idle', 'current', 'error'].includes(updater.status)) void api.updateCheck()
+  }
+
   const updateLabel = ({
     checking: 'กำลังตรวจ...',
     available: `ดาวน์โหลด ${updater.version || ''}`,
@@ -243,8 +259,11 @@ function App() {
     setProject(value)
     setEvents([])
     const [nextFiles, history, undoHistory] = await Promise.all([api.listFiles(), api.historyGet(), api.undoList()])
+    const historyList = await api.historyList()
     setFiles(nextFiles)
     setUndoStack(undoHistory)
+    setConversationId(history.conversationId)
+    setConversations(historyList)
     sessionIdRef.current = history.sessionId || null
     setSessionId(history.sessionId || null)
     setEvents((history.events || []).map(event => ({ ...event, queued: false })))
@@ -252,7 +271,7 @@ function App() {
   }
 
   async function openProject() {
-    if (project && historyReady) await api.historySave({ events, sessionId }).catch(() => {})
+    if (project && historyReady) await api.historySave({ conversationId, events, sessionId }).catch(() => {})
     setHistoryReady(false)
     const value = await api.openProject()
     if (value) {
@@ -402,7 +421,11 @@ function App() {
       addSystemMessage(`### คำสั่ง CodexDesk\n${CHAT_COMMANDS.map(item => `- \`${item.name}\` ${item.description}`).join('\n')}`)
       return
     }
-    if (command === '/new' || command === '/clear') {
+    if (command === '/new') {
+      await newChat()
+      return
+    }
+    if (command === '/clear') {
       await clearHistory()
       return
     }
@@ -449,7 +472,7 @@ function App() {
       return
     }
     if (command === '/update') {
-      await updateApp()
+      openUpdate()
       addSystemMessage('กำลังตรวจอัปเดต')
       return
     }
@@ -483,13 +506,43 @@ function App() {
     api.codexStop()
   }
 
-  async function clearHistory() {
-    if (!confirm('ลบประวัติแชทของโฟลเดอร์นี้ทั้งหมดหรือไม่')) return
-    await api.historyClear()
-    sessionIdRef.current = null
-    setSessionId(null)
-    setEvents([])
+  function applyConversation(history) {
+    sessionIdRef.current = history.sessionId || null
+    setSessionId(history.sessionId || null)
+    setConversationId(history.conversationId)
+    setEvents((history.events || []).map(event => ({ ...event, queued: false })))
     setActivity([])
+  }
+
+  async function newChat() {
+    if (running || !project) return
+    setHistoryReady(false)
+    await api.historySave({ conversationId, events, sessionId }).catch(() => {})
+    const history = await api.historyNew()
+    applyConversation(history)
+    setConversations(await api.historyList())
+    setHistoryOpen(false)
+    setHistoryReady(true)
+  }
+
+  async function openConversation(id) {
+    if (running || id === conversationId) return
+    setHistoryReady(false)
+    await api.historySave({ conversationId, events, sessionId }).catch(() => {})
+    const history = await api.historyOpen(id)
+    applyConversation(history)
+    setConversations(await api.historyList())
+    setHistoryOpen(false)
+    setHistoryReady(true)
+  }
+
+  async function clearHistory() {
+    if (running || !confirm('ลบแชทนี้หรือไม่')) return
+    setHistoryReady(false)
+    const history = await api.historyClear(conversationId)
+    applyConversation(history)
+    setConversations(await api.historyList())
+    setHistoryReady(true)
   }
 
   async function copyChat() {
@@ -547,7 +600,7 @@ function App() {
       <div className="brand"><div className="brand-mark"><Code2 size={15} /></div><span>CodexDesk</span></div>
       <button className="project-switcher" onClick={openProject}><FolderOpen size={15} /><span>{project?.name || 'เปิดโปรเจกต์'}</span><ChevronDown size={13} /></button>
       <div className="title-actions">
-        <button className={`update-button ${updater.status}`} onClick={updateApp} disabled={['checking', 'downloading'].includes(updater.status)}>{updater.status === 'downloaded' || updater.status === 'available' ? <Download size={13} /> : <RefreshCw size={13} />}<span>{updateLabel}</span></button>
+        <button className={`update-button ${updater.status}`} onClick={openUpdate}>{updater.status === 'downloaded' || updater.status === 'available' ? <Download size={13} /> : <RefreshCw size={13} />}<span>{updateLabel}</span></button>
         <button className={`account-button ${authenticated ? 'connected' : ''}`} onClick={openAccount}>{authenticated ? <Check size={13} /> : <LogIn size={13} />}<span>{authenticated ? 'เชื่อมต่อแล้ว' : 'เชื่อมต่อ ChatGPT'}</span></button>
         <span className={`status-dot ${running ? 'active' : ''}`} /><span>{running ? 'กำลังทำงาน' : 'พร้อมใช้งาน'}</span>
       </div>
@@ -584,7 +637,7 @@ function App() {
       </section>
 
       <aside className="agent-panel">
-        <div className="agent-heading"><div><Bot size={17} /><span>Codex</span></div><div className="agent-actions"><button className="icon-action" disabled={events.length === 0} onClick={copyChat} title="คัดลอกแชททั้งหมด"><Copy size={14} /></button><button className="icon-action" disabled={running || undoStack.length === 0} onClick={undoLastTask} title="ย้อนกลับงานล่าสุด"><Undo2 size={14} /></button><button className={activityOpen ? 'active' : ''} onClick={() => setActivityOpen(value => !value)} title="Ctrl ซ้าย + O"><ListTodo size={15} />กิจกรรม{queue.length > 0 && <b>{queue.length}</b>}</button><button disabled={!running} onClick={stopCodex}><CircleStop size={15} />หยุด</button></div></div>
+        <div className="agent-heading"><div><Bot size={17} /><span>Codex</span></div><div className="agent-actions"><button className="icon-action" disabled={running} onClick={newChat} title="แชทใหม่"><Plus size={14} /></button><button className={`icon-action ${historyOpen ? 'active' : ''}`} onClick={() => { setHistoryOpen(value => !value); setActivityOpen(false) }} title="ประวัติแชท"><History size={14} /></button><button className="icon-action" disabled={events.length === 0} onClick={copyChat} title="คัดลอกแชททั้งหมด"><Copy size={14} /></button><button className="icon-action" disabled={running || undoStack.length === 0} onClick={undoLastTask} title="ย้อนกลับงานล่าสุด"><Undo2 size={14} /></button><button className={activityOpen ? 'active' : ''} onClick={() => { setActivityOpen(value => !value); setHistoryOpen(false) }} title="Ctrl ซ้าย + O"><ListTodo size={15} />กิจกรรม{queue.length > 0 && <b>{queue.length}</b>}</button><button disabled={!running} onClick={stopCodex}><CircleStop size={15} />หยุด</button></div></div>
         <div className="agent-meta"><span>Local workspace</span><span>{allowEdit ? 'Workspace write' : 'Read only'}</span></div>
         <div className="conversation">
           {events.length === 0 && <div className="welcome"><div className="welcome-icon"><Bot size={22} /></div><h2>เริ่มสร้างด้วย Codex</h2><p>บอกสิ่งที่ต้องการแก้ไขในโปรเจกต์นี้</p></div>}
@@ -593,6 +646,10 @@ function App() {
           <div ref={conversationEnd} className="conversation-end" />
         </div>
         {running && <div className="live-status"><div><i /><span>{liveActivity?.title || 'กำลังเริ่มงาน'}</span></div>{(liveStats.additions > 0 || liveStats.deletions > 0) && <strong><b>+{liveStats.additions}</b><em>-{liveStats.deletions}</em></strong>}</div>}
+        <AnimatePresence>{historyOpen && <motion.div className="activity-drawer history-drawer" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
+          <div className="activity-heading"><div><History size={15} /><span>ประวัติแชท</span></div><button className="new-chat-button" onClick={newChat} disabled={running}><Plus size={13} />แชทใหม่</button></div>
+          <div className="history-list">{conversations.map(item => <button className={item.conversationId === conversationId ? 'active' : ''} key={item.conversationId} onClick={() => openConversation(item.conversationId)} disabled={running}><span>{item.title}</span><time>{new Date(item.updatedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}</time></button>)}</div>
+        </motion.div>}</AnimatePresence>
         <AnimatePresence>{activityOpen && <motion.div className="activity-drawer" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
           <div className="activity-heading"><div><ListTodo size={15} /><span>กิจกรรมของ Codex</span></div><div className="activity-heading-actions"><kbd>Ctrl + O</kbd><button onClick={clearHistory} title="ล้างประวัติแชท"><Trash2 size={13} /></button></div></div>
           {queue.length > 0 && <div className="queue-section"><strong>คิวข้อความ {queue.length}</strong>{queue.map((task, index) => <div className="queue-item" key={task.id}><span>{index + 1}</span><p>{task.text}</p></div>)}</div>}
@@ -612,6 +669,18 @@ function App() {
         </div>
       </aside>
     </main>
+    <AnimatePresence>{updateOpen && <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="update-modal" initial={{ opacity: 0, scale: .96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .97 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
+        <button className="modal-close" onClick={() => setUpdateOpen(false)}><X size={16} /></button>
+        <div className="update-brand"><div><Code2 size={18} /></div><span>CODEXDESK UPDATE</span></div>
+        <h2>{updater.status === 'available' ? `พร้อมอัปเดตเป็น ${updater.version}` : updater.status === 'downloaded' ? 'พร้อมติดตั้งอัปเดต' : updater.status === 'current' ? 'เป็นเวอร์ชันล่าสุดแล้ว' : updater.status === 'error' ? 'ตรวจสอบอัปเดตไม่สำเร็จ' : updater.status === 'downloading' ? 'กำลังดาวน์โหลดอัปเดต' : 'กำลังตรวจสอบอัปเดต'}</h2>
+        <p>{updater.status === 'downloaded' ? 'แอปจะปิดและเปิดใหม่หลังติดตั้งเสร็จ' : updater.status === 'available' ? 'ดาวน์โหลดเมื่อคุณกดยืนยันเท่านั้น' : updater.status === 'current' ? 'ยังไม่มีเวอร์ชันใหม่สำหรับติดตั้ง' : updater.status === 'error' ? 'ตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง' : 'กำลังเชื่อมต่อกับ GitHub Releases'}</p>
+        <div className="update-progress"><i style={{ width: updater.status === 'downloading' ? `${updater.percent}%` : updater.status === 'downloaded' || updater.status === 'current' ? '100%' : updater.status === 'available' ? '35%' : '12%' }} /></div>
+        <div className="update-details"><span>เวอร์ชันปัจจุบัน</span><strong>{currentVersion || 'กำลังตรวจสอบ'}</strong><span>เวอร์ชันใหม่</span><strong>{updater.version || 'กำลังตรวจสอบ'}</strong></div>
+        <button className="update-primary" onClick={updateApp} disabled={['checking', 'downloading'].includes(updater.status)}>{updater.status === 'available' ? 'ดาวน์โหลดอัปเดต' : updater.status === 'downloaded' ? 'ติดตั้งและเปิดใหม่' : updater.status === 'current' ? 'ตรวจสอบอีกครั้ง' : updater.status === 'error' ? 'ลองอีกครั้ง' : updater.status === 'downloading' ? `ดาวน์โหลด ${updater.percent}%` : 'กำลังตรวจสอบ'}</button>
+        <span className="update-note">CodexDesk จะไม่ดาวน์โหลดหรือติดตั้งเอง</span>
+      </motion.div>
+    </motion.div>}</AnimatePresence>
     <AnimatePresence>{authOpen && <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <motion.div className="auth-modal" initial={{ opacity: 0, scale: .96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .97 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
         <button className="modal-close" onClick={() => setAuthOpen(false)}><X size={16} /></button>

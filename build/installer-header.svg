@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="57" viewBox="0 0 150 57">
+  <rect width="150" height="57" fill="#0a0a0b"/>
+  <path d="M29 17 18 28.5 29 40M47 17l11 11.5L47 40" fill="none" stroke="#f2f2f4" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="70" y="27" fill="#eeeeef" font-family="Segoe UI,Arial" font-size="10" font-weight="600">CodexDesk</text>
+  <text x="70" y="39" fill="#77777d" font-family="Segoe UI,Arial" font-size="6" letter-spacing="1">SETUP</text>
+</svg>

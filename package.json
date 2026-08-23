@@ -1,6 +1,6 @@
 {
   "name": "codexdesk",
-  "version": "2.4.1",
+  "version": "2.5.0",
   "private": true,
   "description": "Desktop workspace for OpenAI Codex CLI",
   "repository": { "type": "git", "url": "https://github.com/nidvjj-sudo/CodexDesk.git" },
@@ -38,9 +38,25 @@
     "productName": "CodexDesk",
     "asar": false,
     "files": ["dist/**/*", "electron/**/*", "package.json"],
-    "directories": { "output": "release" },
+    "directories": { "output": "release", "buildResources": "build" },
     "publish": { "provider": "github", "owner": "nidvjj-sudo", "repo": "CodexDesk", "releaseType": "release" },
-    "win": { "target": ["nsis"] },
-    "nsis": { "artifactName": "CodexDesk-Setup-${version}-${arch}.${ext}", "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true }
+    "win": { "target": ["nsis"], "icon": "build/icon.ico" },
+    "nsis": {
+      "artifactName": "CodexDesk-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CodexDesk",
+      "uninstallDisplayName": "CodexDesk",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeader": "build/installer-header.bmp",
+      "installerSidebar": "build/installer-sidebar.bmp",
+      "uninstallerSidebar": "build/uninstaller-sidebar.bmp",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    }
   }
 }

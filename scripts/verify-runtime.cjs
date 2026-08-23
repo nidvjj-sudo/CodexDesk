@@ -1,10 +1,26 @@
 const { spawnSync } = require('child_process')
-const { existsSync } = require('fs')
+const { existsSync, readFileSync } = require('fs')
 const path = require('path')
+
+const root = path.resolve(__dirname, '..')
+const assets = [
+  ['icon.ico'],
+  ['installer-header.bmp', 150, 57],
+  ['installer-sidebar.bmp', 164, 314],
+  ['uninstaller-sidebar.bmp', 164, 314]
+]
+
+for (const [name, width, height] of assets) {
+  const file = path.join(root, 'build', name)
+  if (!existsSync(file)) throw new Error(`Build asset not found: ${name}`)
+  if (width && height) {
+    const data = readFileSync(file)
+    if (data.readUInt32LE(18) !== width || Math.abs(data.readInt32LE(22)) !== height) throw new Error(`Invalid build asset size: ${name}`)
+  }
+}
 
 if (process.platform !== 'win32') process.exit(0)
 
-const root = path.resolve(__dirname, '..')
 const candidates = [
   path.join(root, 'node_modules', '@openai', 'codex', 'node_modules', '@openai', 'codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe'),
   path.join(root, 'node_modules', '@openai', 'codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe')

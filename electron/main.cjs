@@ -1,6 +1,6 @@
 const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require('electron')
 const { spawn } = require('child_process')
-const { createHash } = require('crypto')
+const { createHash, randomUUID } = require('crypto')
 const { existsSync, mkdirSync, watch } = require('fs')
 const fs = require('fs/promises')
 const path = require('path')
@@ -13,6 +13,7 @@ let codexStopRequested = false
 let authProcess
 let projectWatcher
 let projectWatchTimer
+let historyMutation = Promise.resolve()
 let updateState = { status: 'idle', version: null, percent: 0 }
 
 const ignored = new Set(['.git', '.idea', '.vs', 'node_modules', 'bin', 'obj', 'dist', 'release', 'build', 'venv', '.venv', '__pycache__'])
@@ -196,14 +197,58 @@ async function restoreUndoSnapshot(id) {
   return true
 }
 
-function normalizeHistory(payload = {}) {
+function normalizeConversation(payload = {}, id = payload.conversationId || randomUUID()) {
   const allowedKinds = new Set(['user', 'agent_message', 'output', 'error', 'system'])
   const events = Array.isArray(payload.events) ? payload.events.slice(-300).flatMap(event => {
     if (!event || !allowedKinds.has(event.kind) || typeof event.text !== 'string') return []
     return [{ id: typeof event.id === 'string' ? event.id : undefined, kind: event.kind, text: event.text.slice(0, 100000) }]
   }) : []
   const sessionId = typeof payload.sessionId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(payload.sessionId) ? payload.sessionId : null
-  return { version: 1, project: projectRoot, sessionId, events, updatedAt: new Date().toISOString() }
+  const firstMessage = events.find(event => event.kind === 'user')?.text.trim()
+  const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 60) : firstMessage?.slice(0, 60) || 'แชทใหม่'
+  const updatedAt = typeof payload.updatedAt === 'string' ? payload.updatedAt : new Date().toISOString()
+  return { conversationId: id, title, sessionId, events, updatedAt }
+}
+
+async function readHistoryStore() {
+  try {
+    const data = JSON.parse(await fs.readFile(chatHistoryFile(), 'utf8'))
+    if (data.version === 2 && Array.isArray(data.conversations)) {
+      const conversations = data.conversations.slice(-50).map(item => normalizeConversation(item, item.conversationId))
+      const activeId = conversations.some(item => item.conversationId === data.activeId) ? data.activeId : conversations.at(-1)?.conversationId || null
+      return { version: 2, project: projectRoot, activeId, conversations }
+    }
+    const legacy = normalizeConversation(data)
+    return { version: 2, project: projectRoot, activeId: legacy.conversationId, conversations: [legacy] }
+  } catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return { version: 2, project: projectRoot, activeId: null, conversations: [] }
+    throw error
+  }
+}
+
+async function writeHistoryStore(store) {
+  const file = chatHistoryFile()
+  const temporary = `${file}.tmp`
+  await fs.writeFile(temporary, JSON.stringify(store, null, 2), 'utf8')
+  await fs.rename(temporary, file)
+}
+
+async function activeConversation() {
+  const store = await readHistoryStore()
+  let conversation = store.conversations.find(item => item.conversationId === store.activeId)
+  if (!conversation) {
+    conversation = normalizeConversation()
+    store.conversations.push(conversation)
+    store.activeId = conversation.conversationId
+    await writeHistoryStore(store)
+  }
+  return { store, conversation }
+}
+
+function mutateHistory(task) {
+  const operation = historyMutation.then(task, task)
+  historyMutation = operation.catch(() => {})
+  return operation
 }
 
 async function walk(directory, depth = 0) {
@@ -307,6 +352,7 @@ ipcMain.handle('project:open', async () => {
 })
 
 ipcMain.handle('project:get', () => projectRoot ? { path: projectRoot, name: path.basename(projectRoot) } : null)
+ipcMain.handle('app:version', () => app.getVersion())
 ipcMain.handle('files:list', async () => projectRoot ? walk(projectRoot) : [])
 ipcMain.handle('files:read', async (_, input) => {
   const file = safePath(input)
@@ -320,25 +366,49 @@ ipcMain.handle('files:write', async (_, payload) => {
   return true
 })
 ipcMain.handle('history:get', async () => {
-  try {
-    const history = JSON.parse(await fs.readFile(chatHistoryFile(), 'utf8'))
-    return normalizeHistory(history)
-  } catch (error) {
-    if (error.code === 'ENOENT' || error instanceof SyntaxError) return normalizeHistory()
-    throw error
-  }
+  const { conversation } = await activeConversation()
+  return conversation
 })
-ipcMain.handle('history:save', async (_, payload) => {
-  const file = chatHistoryFile()
-  const temporary = `${file}.tmp`
-  await fs.writeFile(temporary, JSON.stringify(normalizeHistory(payload), null, 2), 'utf8')
-  await fs.rename(temporary, file)
-  return true
+ipcMain.handle('history:save', (_, payload) => mutateHistory(async () => {
+  const store = await readHistoryStore()
+  const conversation = normalizeConversation(payload)
+  const index = store.conversations.findIndex(item => item.conversationId === conversation.conversationId)
+  if (index < 0) store.conversations.push(conversation)
+  else store.conversations[index] = conversation
+  store.conversations = store.conversations.slice(-50)
+  store.activeId = conversation.conversationId
+  await writeHistoryStore(store)
+  return conversation
+}))
+ipcMain.handle('history:list', async () => {
+  const store = await readHistoryStore()
+  return store.conversations.slice().reverse().map(({ conversationId, title, updatedAt }) => ({ conversationId, title, updatedAt, active: conversationId === store.activeId }))
 })
-ipcMain.handle('history:clear', async () => {
-  await fs.rm(chatHistoryFile(), { force: true })
-  return true
-})
+ipcMain.handle('history:new', () => mutateHistory(async () => {
+  const store = await readHistoryStore()
+  const conversation = normalizeConversation()
+  store.conversations.push(conversation)
+  store.conversations = store.conversations.slice(-50)
+  store.activeId = conversation.conversationId
+  await writeHistoryStore(store)
+  return conversation
+}))
+ipcMain.handle('history:open', (_, id) => mutateHistory(async () => {
+  const store = await readHistoryStore()
+  const conversation = store.conversations.find(item => item.conversationId === id)
+  if (!conversation) throw new Error('ไม่พบประวัติแชทนี้')
+  store.activeId = id
+  await writeHistoryStore(store)
+  return conversation
+}))
+ipcMain.handle('history:clear', (_, id) => mutateHistory(async () => {
+  const store = await readHistoryStore()
+  const target = id || store.activeId
+  store.conversations = store.conversations.filter(item => item.conversationId !== target)
+  store.activeId = store.conversations.at(-1)?.conversationId || null
+  await writeHistoryStore(store)
+  return activeConversation().then(result => result.conversation)
+}))
 ipcMain.handle('undo:create', async (_, label) => createUndoSnapshot(label))
 ipcMain.handle('undo:list', async () => listUndoSnapshots())
 ipcMain.handle('undo:restore', async (_, id) => restoreUndoSnapshot(id))
