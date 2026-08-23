@@ -3,7 +3,7 @@ import Editor from '@monaco-editor/react'
 import { motion, AnimatePresence } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, Globe2, History, ListTodo, LogIn, LogOut, Plug, Plus, Power, RefreshCw, Save, Send, Server, ShieldCheck, SquareTerminal, Trash2, Undo2, X } from 'lucide-react'
+import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, Globe2, History, ListTodo, LogIn, LogOut, Plug, Plus, Power, RefreshCw, Save, Search, Send, Server, ShieldCheck, SquareTerminal, Trash2, Undo2, X } from 'lucide-react'
 
 const api = window.codexDesk
 const CHAT_COMMANDS = [
@@ -78,9 +78,21 @@ function fileChangeDetails(item) {
   })
 }
 
+function filterFileTree(nodes, input) {
+  const query = input.trim().toLowerCase()
+  if (!query) return nodes
+  return nodes.flatMap(node => {
+    if (!node.directory) return node.name.toLowerCase().includes(query) ? [node] : []
+    if (node.name.toLowerCase().includes(query)) return [node]
+    const children = filterFileTree(node.children || [], query)
+    return children.length > 0 ? [{ ...node, children }] : []
+  })
+}
+
 function App() {
   const [project, setProject] = useState(null)
   const [files, setFiles] = useState([])
+  const [fileQuery, setFileQuery] = useState('')
   const [currentFile, setCurrentFile] = useState(null)
   const [content, setContent] = useState('')
   const [savedContent, setSavedContent] = useState('')
@@ -128,6 +140,7 @@ function App() {
   const currentTaskIndex = activity.map(item => item.type).lastIndexOf('task')
   const currentTaskActivity = currentTaskIndex >= 0 ? activity.slice(currentTaskIndex) : activity
   const liveStats = currentTaskActivity.reduce((total, item) => ({ additions: total.additions + (item.additions || 0), deletions: total.deletions + (item.deletions || 0) }), { additions: 0, deletions: 0 })
+  const visibleFiles = useMemo(() => filterFileTree(files, fileQuery), [files, fileQuery])
 
   useEffect(() => {
     api.getVersion().then(setCurrentVersion)
@@ -671,7 +684,7 @@ function App() {
 
   return <div className="app-shell">
     <header className="titlebar">
-      <div className="brand"><div className="brand-mark"><Code2 size={15} /></div><span>CodexDesk</span></div>
+      <div className="brand"><div className="brand-mark"><Code2 size={15} /></div><div className="brand-copy"><span>CodexDesk</span><small>AI CODE WORKSPACE</small></div></div>
       <button className="project-switcher" onClick={openProject}><FolderOpen size={15} /><span>{project?.name || 'เปิดโปรเจกต์'}</span><ChevronDown size={13} /></button>
       <div className="title-actions">
         <button className={`update-button ${updater.status}`} onClick={openUpdate}>{updater.status === 'downloaded' || updater.status === 'available' ? <Download size={13} /> : <RefreshCw size={13} />}<span>{updateLabel}</span></button>
@@ -682,24 +695,25 @@ function App() {
 
     <main className={`workspace view-${mobileView}`}>
       <aside className="rail">
-        <button className={`rail-button ${mobileView === 'files' ? 'active' : ''}`} onClick={() => setMobileView('files')} title="ไฟล์"><FolderOpen size={18} /></button>
-        <button className={`rail-button ${mobileView === 'editor' ? 'active' : ''}`} onClick={() => setMobileView('editor')} title="ตัวแก้ไขโค้ด"><Code2 size={18} /></button>
-        <button className={`rail-button ${mobileView === 'chat' ? 'active' : ''}`} onClick={() => setMobileView('chat')} title="Codex"><Bot size={18} /></button>
-        <button className="rail-button" onClick={() => { setMobileView('editor'); loadDiff() }} title="Git Diff"><GitCompare size={18} /></button>
-        <button className="rail-button" onClick={openMcp} title="ปลั๊กอิน MCP"><Plug size={18} /></button>
+        <button className={`rail-button ${mobileView === 'files' ? 'active' : ''}`} onClick={() => setMobileView('files')} title="ไฟล์"><FolderOpen size={17} /><span>ไฟล์</span></button>
+        <button className={`rail-button ${mobileView === 'editor' ? 'active' : ''}`} onClick={() => setMobileView('editor')} title="ตัวแก้ไขโค้ด"><Code2 size={17} /><span>โค้ด</span></button>
+        <button className={`rail-button ${mobileView === 'chat' ? 'active' : ''}`} onClick={() => setMobileView('chat')} title="Codex"><Bot size={17} /><span>Codex</span></button>
+        <button className="rail-button" onClick={() => { setMobileView('editor'); loadDiff() }} title="Git Diff"><GitCompare size={17} /><span>Diff</span></button>
+        <button className="rail-button" onClick={openMcp} title="ปลั๊กอิน MCP"><Plug size={17} /><span>ปลั๊กอิน</span></button>
         <div className="rail-spacer" />
-        <button className={`rail-button ${authenticated ? 'signed-in' : ''}`} onClick={openAccount} title={authenticated ? 'บัญชี ChatGPT' : 'เข้าสู่ระบบ ChatGPT'}>{authenticated ? <Check size={18} /> : <LogIn size={18} />}</button>
+        <button className={`rail-button ${authenticated ? 'signed-in' : ''}`} onClick={openAccount} title={authenticated ? 'บัญชี ChatGPT' : 'เข้าสู่ระบบ ChatGPT'}>{authenticated ? <Check size={17} /> : <LogIn size={17} />}<span>บัญชี</span></button>
       </aside>
 
       <aside className="explorer">
-        <div className="panel-heading"><span>EXPLORER</span><button onClick={refreshFiles}><RefreshCw size={14} /></button></div>
-        <div className="project-label">{project?.name || 'NO PROJECT'}</div>
-        <div className="file-tree">{files.map(node => <FileNode key={node.path} node={node} onOpen={openFile} />)}</div>
+        <div className="panel-heading"><div><span>PROJECT FILES</span><small>{project ? 'LOCAL' : 'EMPTY'}</small></div><button onClick={refreshFiles}><RefreshCw size={14} /></button></div>
+        <div className="project-label"><FolderOpen size={13} /><span>{project?.name || 'ยังไม่ได้เปิดโปรเจกต์'}</span></div>
+        <label className="file-search"><Search size={13} /><input value={fileQuery} onChange={event => setFileQuery(event.target.value)} placeholder="ค้นหาไฟล์" /></label>
+        <div className="file-tree">{visibleFiles.map(node => <FileNode key={node.path} node={node} onOpen={openFile} />)}{visibleFiles.length === 0 && fileQuery && <div className="file-empty">ไม่พบไฟล์</div>}</div>
       </aside>
 
       <section className="editor-area">
         <div className="editor-tabs">
-          {currentFile ? <div className="editor-tab active"><File size={13} /><span>{currentFile.name}</span>{dirty && <i />}</div> : <div className="empty-tab">เลือกไฟล์จาก Explorer</div>}
+          {currentFile ? <div className="editor-tab active"><File size={13} /><span>{project?.name}</span><ChevronRight size={11} /><strong>{currentFile.name}</strong>{dirty && <i />}</div> : <div className="empty-tab"><Code2 size={13} />พื้นที่แก้ไขโค้ด</div>}
           <button className="save-button" disabled={!dirty} onClick={saveFile}><Save size={14} />บันทึก</button>
         </div>
         <div className="editor-wrap">
@@ -709,13 +723,14 @@ function App() {
           <div className="diff-heading"><GitCompare size={14} /><span>Git Diff</span><button onClick={loadDiff}><RefreshCw size={13} />รีเฟรช</button></div>
           <pre className="diff-view">{diff || 'การเปลี่ยนแปลงของ Codex จะแสดงที่นี่'}</pre>
         </div>
+        <div className="editor-status"><span>{currentFile ? language.toUpperCase() : 'NO FILE'}</span><span>{dirty ? 'ยังไม่ได้บันทึก' : 'บันทึกแล้ว'}</span><span>UTF-8</span></div>
       </section>
 
       <aside className="agent-panel">
         <div className="agent-heading"><div><Bot size={17} /><span>Codex</span></div><div className="agent-actions"><button className="icon-action" disabled={running} onClick={newChat} title="แชทใหม่"><Plus size={14} /></button><button className={`icon-action ${historyOpen ? 'active' : ''}`} onClick={() => { setHistoryOpen(value => !value); setActivityOpen(false) }} title="ประวัติแชท"><History size={14} /></button><button className="icon-action" disabled={events.length === 0} onClick={copyChat} title="คัดลอกแชททั้งหมด"><Copy size={14} /></button><button className="icon-action" disabled={running || undoStack.length === 0} onClick={undoLastTask} title="ย้อนกลับงานล่าสุด"><Undo2 size={14} /></button><button className={activityOpen ? 'active' : ''} onClick={() => { setActivityOpen(value => !value); setHistoryOpen(false) }} title="Ctrl ซ้าย + O"><ListTodo size={15} />กิจกรรม{queue.length > 0 && <b>{queue.length}</b>}</button><button disabled={!running} onClick={stopCodex}><CircleStop size={15} />หยุด</button></div></div>
         <div className="agent-meta"><span>Local workspace</span><span>{allowEdit ? 'Workspace write' : 'Read only'}</span></div>
         <div className="conversation">
-          {events.length === 0 && <div className="welcome"><div className="welcome-icon"><Bot size={22} /></div><h2>เริ่มสร้างด้วย Codex</h2><p>บอกสิ่งที่ต้องการแก้ไขในโปรเจกต์นี้</p></div>}
+          {events.length === 0 && <div className="welcome"><span className="welcome-kicker">CODEX WORKSPACE</span><div className="welcome-icon"><Bot size={22} /></div><h2>วันนี้ต้องการสร้างอะไร</h2><p>สั่งให้ Codex อ่าน ตรวจสอบ หรือแก้ไขโปรเจกต์นี้</p><div className="welcome-actions"><button onClick={() => setPrompt('ตรวจสอบโครงสร้างโปรเจกต์และสรุปสิ่งที่ควรปรับปรุง')}><Search size={13} /><span>ตรวจโปรเจกต์</span></button><button onClick={() => setPrompt('ค้นหาบัคที่อาจเกิดขึ้นและแก้ไขให้ปลอดภัย')}><ShieldCheck size={13} /><span>ค้นหาบัค</span></button><button onClick={() => setPrompt('อธิบายโค้ดและการทำงานของโปรเจกต์นี้')}><Code2 size={13} /><span>อธิบายโค้ด</span></button></div></div>}
           {events.map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><div className="message-label"><span>{event.kind === 'user' ? event.queued ? 'คุณ · อยู่ในคิว' : 'คุณ' : event.kind === 'system' ? 'ระบบ' : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title="คัดลอกข้อความ"><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage text={event.text} /></div></motion.div>)}
           {running && <div className="thinking"><i /><i /><i /></div>}
           <div ref={conversationEnd} className="conversation-end" />
