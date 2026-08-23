@@ -15,6 +15,7 @@ let projectWatcher
 let projectWatchTimer
 let historyMutation = Promise.resolve()
 let updateState = { status: 'idle', version: null, percent: 0 }
+let updateCheckSequence = 0
 let powerSaveBlockerId = null
 let currentAppSettings
 let discordClient
@@ -368,17 +369,45 @@ function releaseNotes(info) {
   return ''
 }
 
+async function checkForUpdatesWithTimeout() {
+  if (!app.isPackaged) {
+    publishUpdateState({ status: 'current', version: app.getVersion(), percent: 0, error: null })
+    return true
+  }
+  const sequence = ++updateCheckSequence
+  publishUpdateState({ status: 'checking', version: null, percent: 0, error: null })
+  let timeout
+  try {
+    const timeoutPromise = new Promise((_, reject) => {
+      timeout = setTimeout(() => {
+        const error = new Error('Update check timed out')
+        error.code = 'UPDATE_CHECK_TIMEOUT'
+        reject(error)
+      }, 25000)
+    })
+    await Promise.race([autoUpdater.checkForUpdates(), timeoutPromise])
+    return true
+  } catch (error) {
+    if (sequence === updateCheckSequence) {
+      publishUpdateState({ status: 'error', percent: 0, error: error?.code === 'UPDATE_CHECK_TIMEOUT' ? 'timeout' : 'network' })
+    }
+    return false
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 function setupAutoUpdater() {
   if (!app.isPackaged) return
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
-  autoUpdater.on('checking-for-update', () => publishUpdateState({ status: 'checking', percent: 0 }))
-  autoUpdater.on('update-available', info => publishUpdateState({ status: 'available', version: info.version, notes: releaseNotes(info), percent: 0 }))
-  autoUpdater.on('update-not-available', () => publishUpdateState({ status: 'current', version: app.getVersion(), percent: 0 }))
+  autoUpdater.on('checking-for-update', () => publishUpdateState({ status: 'checking', percent: 0, error: null }))
+  autoUpdater.on('update-available', info => publishUpdateState({ status: 'available', version: info.version, notes: releaseNotes(info), percent: 0, error: null }))
+  autoUpdater.on('update-not-available', () => publishUpdateState({ status: 'current', version: app.getVersion(), percent: 0, error: null }))
   autoUpdater.on('download-progress', info => publishUpdateState({ status: 'downloading', percent: Math.round(info.percent || 0) }))
   autoUpdater.on('update-downloaded', info => publishUpdateState({ status: 'downloaded', version: info.version, percent: 100 }))
-  autoUpdater.on('error', () => publishUpdateState({ status: 'error', percent: 0 }))
-  setTimeout(() => autoUpdater.checkForUpdates().catch(() => publishUpdateState({ status: 'error' })), 5000)
+  autoUpdater.on('error', () => publishUpdateState({ status: 'error', percent: 0, error: 'network' }))
+  setTimeout(() => void checkForUpdatesWithTimeout(), 5000)
 }
 
 function safePath(input) {
@@ -1016,11 +1045,7 @@ ipcMain.handle('clipboard:write', (_, input) => {
   return true
 })
 ipcMain.handle('update:state', () => updateState)
-ipcMain.handle('update:check', async () => {
-  if (!app.isPackaged) return publishUpdateState({ status: 'current', version: app.getVersion() })
-  await autoUpdater.checkForUpdates()
-  return true
-})
+ipcMain.handle('update:check', () => checkForUpdatesWithTimeout())
 ipcMain.handle('update:download', async () => {
   await autoUpdater.downloadUpdate()
   return true
