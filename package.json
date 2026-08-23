@@ -1,6 +1,6 @@
 {
   "name": "codexdesk",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "description": "Desktop workspace for OpenAI Codex CLI",
   "repository": { "type": "git", "url": "https://github.com/nidvjj-sudo/CodexDesk.git" },
@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
-    "@openai/codex": "0.143.0",
+    "@openai/codex": "0.147.0",
     "electron-updater": "6.3.9",
     "lucide-react": "^0.468.0",
     "monaco-editor": "^0.52.2",

@@ -20,6 +20,16 @@ function cleanProcessText(value) {
     .replace(/%1B(?:%5B|\[)[0-9;]*m/gi, '')
 }
 
+function explainCodexFailure(value) {
+  const text = cleanProcessText(value).trim()
+  if (/not logged in|login required|unauthorized|\b401\b/i.test(text)) return 'บัญชี ChatGPT หมดอายุ กรุณาเชื่อมต่อบัญชีใหม่'
+  if (/unexpected argument|invalid value|Usage:/i.test(text)) return 'Codex runtime ไม่รองรับคำสั่งนี้ กรุณาอัปเดต CodexDesk'
+  if (/models cache|base_instructions/i.test(text)) return 'ข้อมูลโมเดล Codex ไม่สมบูรณ์ กรุณาปิดแอปแล้วเปิดใหม่'
+  if (/blocked by policy|rejected: blocked/i.test(text)) return 'Windows บล็อกคำสั่งของ Codex กรุณาเปิดโหมดแก้ไขไฟล์ได้แล้วลองใหม่'
+  const detail = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !/codex_core|Wall time:|^\d{4}-\d{2}-\d{2}T/.test(line)).at(-1)
+  return detail ? `Codex ทำงานไม่สำเร็จ: ${detail.slice(0, 240)}` : 'Codex ทำงานไม่สำเร็จ กรุณาลองสั่งงานใหม่'
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1540,
@@ -265,15 +275,18 @@ ipcMain.handle('codex:run', async (_, options) => {
     'คำสั่งจากผู้ใช้:',
     options.prompt
   ].join('\n')
-  const args = [...runtime.prefix, 'exec', '--json', ...accessArgs, '--skip-git-repo-check', prompt]
+  const args = [...runtime.prefix, ...accessArgs, 'exec', '--json', '--skip-git-repo-check', prompt]
   codexProcess = spawn(runtime.file, args, { cwd: projectRoot, windowsHide: true, shell: false, env: runtime.env, stdio: ['ignore', 'pipe', 'pipe'] })
   const send = (type, data) => mainWindow?.webContents.send('codex:event', { type, data })
   const cleanOutput = chunk => cleanProcessText(chunk).replace(/Reading additional input from stdin\.\.\.\r?\n?/g, '')
+  let diagnostics = ''
   codexProcess.stdout.on('data', chunk => {
     const text = cleanOutput(chunk)
     if (text) send('stdout', text)
   })
-  codexProcess.stderr.on('data', () => {})
+  codexProcess.stderr.on('data', chunk => {
+    diagnostics = (diagnostics + cleanOutput(chunk)).slice(-12000)
+  })
   return new Promise(resolve => {
     codexProcess.on('error', error => {
       send('error', error.message)
@@ -281,7 +294,7 @@ ipcMain.handle('codex:run', async (_, options) => {
       resolve({ code: -1 })
     })
     codexProcess.on('close', code => {
-      if (code !== 0) send('error', 'Codex ทำงานไม่สำเร็จ กรุณาลองสั่งงานใหม่')
+      if (code !== 0) send('error', explainCodexFailure(diagnostics))
       send('done', String(code ?? -1))
       codexProcess = null
       resolve({ code })
