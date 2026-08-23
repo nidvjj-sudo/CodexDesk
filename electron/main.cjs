@@ -87,12 +87,19 @@ function publishUpdateState(next) {
   mainWindow?.webContents.send('update:event', updateState)
 }
 
+function releaseNotes(info) {
+  const value = info?.releaseNotes
+  if (typeof value === 'string') return value.slice(0, 4000)
+  if (Array.isArray(value)) return value.map(item => item?.note || '').filter(Boolean).join('\n').slice(0, 4000)
+  return ''
+}
+
 function setupAutoUpdater() {
   if (!app.isPackaged) return
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.on('checking-for-update', () => publishUpdateState({ status: 'checking', percent: 0 }))
-  autoUpdater.on('update-available', info => publishUpdateState({ status: 'available', version: info.version, percent: 0 }))
+  autoUpdater.on('update-available', info => publishUpdateState({ status: 'available', version: info.version, notes: releaseNotes(info), percent: 0 }))
   autoUpdater.on('update-not-available', () => publishUpdateState({ status: 'current', version: app.getVersion(), percent: 0 }))
   autoUpdater.on('download-progress', info => publishUpdateState({ status: 'downloading', percent: Math.round(info.percent || 0) }))
   autoUpdater.on('update-downloaded', info => publishUpdateState({ status: 'downloaded', version: info.version, percent: 100 }))
@@ -329,6 +336,49 @@ function runCodex(args, cwd, onData) {
   })
 }
 
+function validateMcpName(value) {
+  const name = String(value || '').trim()
+  if (!/^[a-zA-Z0-9_-]{1,40}$/.test(name)) throw new Error('ชื่อปลั๊กอินใช้ได้เฉพาะตัวอักษร ตัวเลข ขีดกลาง และขีดล่าง')
+  return name
+}
+
+function parseMcpList(output) {
+  const text = cleanProcessText(output)
+  const start = text.indexOf('[')
+  const end = text.lastIndexOf(']')
+  if (start < 0 || end < start) throw new Error('อ่านรายการปลั๊กอินไม่สำเร็จ')
+  return JSON.parse(text.slice(start, end + 1))
+}
+
+async function listMcpServers() {
+  const result = await runCodex(['mcp', 'list', '--json'], app.getPath('home'))
+  if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
+  return parseMcpList(result.output)
+}
+
+async function setMcpSetting(input, key, value) {
+  const name = validateMcpName(input)
+  if (!['enabled', 'default_tools_approval_mode'].includes(key)) throw new Error('การตั้งค่า MCP ไม่ถูกต้อง')
+  const configFile = path.join(app.getPath('userData'), 'codex-home', 'config.toml')
+  const source = await fs.readFile(configFile, 'utf8')
+  const lines = source.split(/\r?\n/)
+  const header = `[mcp_servers.${name}]`
+  const quotedHeader = `[mcp_servers."${name}"]`
+  const start = lines.findIndex(line => [header, quotedHeader].includes(line.trim()))
+  if (start < 0) throw new Error('ไม่พบปลั๊กอินนี้')
+  let end = lines.findIndex((line, index) => index > start && /^\s*\[/.test(line))
+  if (end < 0) end = lines.length
+  const settingPattern = new RegExp(`^\\s*${key}\\s*=`)
+  const setting = lines.findIndex((line, index) => index > start && index < end && settingPattern.test(line))
+  const next = `${key} = ${value}`
+  if (setting >= 0) lines[setting] = next
+  else lines.splice(start + 1, 0, next)
+  const temporary = `${configFile}.${randomUUID()}.tmp`
+  await fs.writeFile(temporary, lines.join('\n'), 'utf8')
+  await fs.rename(temporary, configFile)
+  return true
+}
+
 function stopProcess(child) {
   if (!child || child.killed) return false
   if (process.platform === 'win32' && child.pid) {
@@ -353,6 +403,17 @@ ipcMain.handle('project:open', async () => {
 
 ipcMain.handle('project:get', () => projectRoot ? { path: projectRoot, name: path.basename(projectRoot) } : null)
 ipcMain.handle('app:version', () => app.getVersion())
+ipcMain.handle('app:uninstall', async () => {
+  if (!app.isPackaged || process.platform !== 'win32') throw new Error('ถอนการติดตั้งได้เฉพาะแอปที่ติดตั้งบน Windows')
+  const directory = path.dirname(process.execPath)
+  const entries = await fs.readdir(directory)
+  const name = entries.find(value => /^uninstall.*\.exe$/i.test(value)) || entries.find(value => /uninstall/i.test(value) && /\.exe$/i.test(value))
+  if (!name) throw new Error('ไม่พบตัวถอนการติดตั้ง กรุณาใช้ Apps & features ของ Windows')
+  const child = spawn(path.join(directory, name), [], { detached: true, stdio: 'ignore', windowsHide: false, shell: false })
+  child.unref()
+  setTimeout(() => app.quit(), 500)
+  return true
+})
 ipcMain.handle('files:list', async () => projectRoot ? walk(projectRoot) : [])
 ipcMain.handle('files:read', async (_, input) => {
   const file = safePath(input)
@@ -462,6 +523,64 @@ ipcMain.handle('auth:logout', async () => {
   if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
   return true
 })
+ipcMain.handle('mcp:list', () => listMcpServers())
+ipcMain.handle('mcp:add', async (_, payload = {}) => {
+  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  const name = validateMcpName(payload.name)
+  const args = ['mcp', 'add', name]
+  if (payload.transport === 'http') {
+    const url = new URL(String(payload.url || ''))
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('URL ต้องเป็น http หรือ https')
+    args.push('--url', url.toString())
+  } else if (payload.transport === 'stdio') {
+    const command = String(payload.command || '').trim()
+    if (!command || command.length > 260 || /[\r\n\0]/.test(command)) throw new Error('คำสั่ง MCP ไม่ถูกต้อง')
+    const commandArgs = Array.isArray(payload.args) ? payload.args.map(value => String(value).trim()).filter(Boolean) : []
+    if (commandArgs.length > 30 || commandArgs.some(value => value.length > 500 || /[\r\n\0]/.test(value))) throw new Error('อาร์กิวเมนต์ MCP ไม่ถูกต้อง')
+    args.push('--', command, ...commandArgs)
+  } else {
+    throw new Error('ประเภท MCP ไม่ถูกต้อง')
+  }
+  const result = await runCodex(args, app.getPath('home'))
+  if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
+  await setMcpSetting(name, 'default_tools_approval_mode', '"auto"')
+  return listMcpServers()
+})
+ipcMain.handle('mcp:remove', async (_, input) => {
+  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  const result = await runCodex(['mcp', 'remove', validateMcpName(input)], app.getPath('home'))
+  if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
+  return listMcpServers()
+})
+ipcMain.handle('mcp:toggle', async (_, payload) => {
+  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  await setMcpSetting(payload?.name, 'enabled', String(Boolean(payload?.enabled)))
+  return listMcpServers()
+})
+ipcMain.handle('mcp:login', async (_, input) => {
+  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  const name = validateMcpName(input)
+  const opened = new Set()
+  const result = await runCodex(['mcp', 'login', name], app.getPath('home'), data => {
+    const output = cleanProcessText(data)
+    mainWindow?.webContents.send('mcp:event', { type: 'output', data: output })
+    for (const match of output.matchAll(/https:\/\/[^\s]+/g)) {
+      const url = match[0].replace(/[),.;]+$/, '')
+      if (!opened.has(url)) {
+        opened.add(url)
+        shell.openExternal(url).catch(() => {})
+      }
+    }
+  })
+  if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
+  return listMcpServers()
+})
+ipcMain.handle('mcp:logout', async (_, input) => {
+  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  const result = await runCodex(['mcp', 'logout', validateMcpName(input)], app.getPath('home'))
+  if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
+  return listMcpServers()
+})
 ipcMain.handle('app:open-external', async (_, input) => {
   const url = new URL(input)
   const allowed = url.protocol === 'https:' && (url.hostname === 'chatgpt.com' || url.hostname.endsWith('.openai.com'))
@@ -503,8 +622,8 @@ ipcMain.handle('codex:run', async (_, options) => {
     ? ['--sandbox', 'danger-full-access', '--ask-for-approval', 'never']
     : ['--sandbox', 'read-only', '--ask-for-approval', 'never']
   const modeInstruction = options.allowEdit
-    ? 'แก้ไขได้เฉพาะไฟล์ภายในโฟลเดอร์โปรเจกต์ปัจจุบัน ห้ามเข้าถึงหรือแก้ไขไฟล์ภายนอกโปรเจกต์'
-    : 'อ่านและวิเคราะห์เท่านั้น ห้ามแก้ไข สร้าง หรือลบไฟล์'
+    ? 'แก้ไขได้เฉพาะไฟล์ภายในโฟลเดอร์โปรเจกต์ปัจจุบัน เครื่องมือ MCP ใช้ได้ตามงานที่ผู้ใช้อนุมัติ ห้ามเข้าถึงข้อมูลอื่นที่ไม่เกี่ยวข้อง'
+    : 'อ่านและวิเคราะห์เท่านั้น ห้ามแก้ไข สร้าง หรือลบไฟล์ และห้ามใช้เครื่องมือ MCP ที่สร้าง แก้ไข หรือลบข้อมูลภายนอก'
   const prompt = [
     'Environment: Windows Server 2019.',
     'Do not use powershell.exe or PowerShell commands. Run executables directly, such as rg.exe and git.exe.',

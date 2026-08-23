@@ -3,7 +3,7 @@ import Editor from '@monaco-editor/react'
 import { motion, AnimatePresence } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, History, ListTodo, LogIn, LogOut, Plus, RefreshCw, Save, Send, ShieldCheck, Trash2, Undo2, X } from 'lucide-react'
+import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, Globe2, History, ListTodo, LogIn, LogOut, Plug, Plus, Power, RefreshCw, Save, Send, Server, ShieldCheck, SquareTerminal, Trash2, Undo2, X } from 'lucide-react'
 
 const api = window.codexDesk
 const CHAT_COMMANDS = [
@@ -22,7 +22,14 @@ const CHAT_COMMANDS = [
   { name: '/undo', description: 'ย้อนกลับงานล่าสุด' },
   { name: '/login', description: 'เปิดหน้าบัญชี ChatGPT' },
   { name: '/logout', description: 'ออกจากระบบ ChatGPT' },
+  { name: '/mcp', description: 'เปิดตัวจัดการปลั๊กอิน MCP' },
   { name: '/stop', description: 'หยุดงานและล้างคิว' }
+]
+
+const MCP_PRESETS = [
+  { name: 'github', label: 'GitHub', description: 'Repository, Issue และ Pull Request', url: 'https://api.githubcopilot.com/mcp/' },
+  { name: 'canva', label: 'Canva', description: 'ค้นหาและจัดการงานออกแบบ', url: 'https://mcp.canva.com/mcp' },
+  { name: 'google_drive', label: 'Google Drive', description: 'ค้นหา อ่าน และจัดการไฟล์', url: 'https://drivemcp.googleapis.com/mcp/v1' }
 ]
 
 function FileNode({ node, onOpen, level = 0 }) {
@@ -100,6 +107,13 @@ function App() {
   const [conversationId, setConversationId] = useState(null)
   const [conversations, setConversations] = useState([])
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [mcpOpen, setMcpOpen] = useState(false)
+  const [mcpServers, setMcpServers] = useState([])
+  const [mcpBusy, setMcpBusy] = useState(false)
+  const [mcpError, setMcpError] = useState('')
+  const [mcpOutput, setMcpOutput] = useState('')
+  const [mcpFormOpen, setMcpFormOpen] = useState(false)
+  const [mcpForm, setMcpForm] = useState({ name: '', transport: 'http', url: '', command: '', arguments: '' })
   const [undoStack, setUndoStack] = useState([])
   const codexBuffer = useRef('')
   const conversationEnd = useRef(null)
@@ -189,6 +203,10 @@ function App() {
     if (event.type === 'error') setAuthState('error')
   }), [])
 
+  useEffect(() => api.onMcpEvent(event => {
+    if (event.type === 'output') setMcpOutput(value => (value + event.data).slice(-4000))
+  }), [])
+
   useEffect(() => {
     api.updateState().then(setUpdater)
     return api.onUpdateEvent(setUpdater)
@@ -238,9 +256,61 @@ function App() {
     return api.updateCheck()
   }
 
+  async function openMcp() {
+    setMcpOpen(true)
+    setMcpError('')
+    setMcpBusy(true)
+    try {
+      setMcpServers(await api.mcpList())
+    } catch (error) {
+      setMcpError(error.message)
+    } finally {
+      setMcpBusy(false)
+    }
+  }
+
+  async function runMcpAction(action) {
+    if (mcpBusy || running) return false
+    setMcpBusy(true)
+    setMcpError('')
+    setMcpOutput('')
+    try {
+      setMcpServers(await action())
+      return true
+    } catch (error) {
+      setMcpError(error.message)
+      return false
+    } finally {
+      setMcpBusy(false)
+    }
+  }
+
+  function installPreset(preset) {
+    return runMcpAction(() => api.mcpAdd({ name: preset.name, transport: 'http', url: preset.url }))
+  }
+
+  async function installMcp() {
+    const payload = mcpForm.transport === 'http'
+      ? { name: mcpForm.name, transport: 'http', url: mcpForm.url }
+      : { name: mcpForm.name, transport: 'stdio', command: mcpForm.command, args: mcpForm.arguments.split(/\r?\n/).map(value => value.trim()).filter(Boolean) }
+    const installed = await runMcpAction(() => api.mcpAdd(payload))
+    if (!installed) return
+    setMcpFormOpen(false)
+    setMcpForm({ name: '', transport: 'http', url: '', command: '', arguments: '' })
+  }
+
   function openUpdate() {
     setUpdateOpen(true)
     if (['idle', 'current', 'error'].includes(updater.status)) void api.updateCheck()
+  }
+
+  async function uninstallApp() {
+    if (!confirm('ถอนการติดตั้ง CodexDesk หรือไม่ ประวัติแชทและการตั้งค่าจะยังถูกเก็บไว้')) return
+    try {
+      await api.appUninstall()
+    } catch (error) {
+      alert(error.message)
+    }
   }
 
   const updateLabel = ({
@@ -398,7 +468,7 @@ function App() {
       void runChatCommand(text)
       return
     }
-    if (allowEdit && approvalMode === 'ask' && !confirm('อนุญาตให้ Codex แก้ไขไฟล์และรันคำสั่งสำหรับงานนี้หรือไม่')) return
+    if (allowEdit && approvalMode === 'ask' && !confirm('อนุญาตให้ Codex แก้ไขไฟล์ รันคำสั่ง และใช้ปลั๊กอิน MCP สำหรับงานนี้หรือไม่')) return
     const task = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text, allowEdit }
     setPrompt('')
     setEvents(items => [...items, { id: task.id, kind: 'user', text, queued: runningRef.current }])
@@ -490,6 +560,10 @@ function App() {
     }
     if (command === '/logout') {
       await signOut()
+      return
+    }
+    if (command === '/mcp') {
+      await openMcp()
       return
     }
     if (command === '/stop') {
@@ -612,6 +686,7 @@ function App() {
         <button className={`rail-button ${mobileView === 'editor' ? 'active' : ''}`} onClick={() => setMobileView('editor')} title="ตัวแก้ไขโค้ด"><Code2 size={18} /></button>
         <button className={`rail-button ${mobileView === 'chat' ? 'active' : ''}`} onClick={() => setMobileView('chat')} title="Codex"><Bot size={18} /></button>
         <button className="rail-button" onClick={() => { setMobileView('editor'); loadDiff() }} title="Git Diff"><GitCompare size={18} /></button>
+        <button className="rail-button" onClick={openMcp} title="ปลั๊กอิน MCP"><Plug size={18} /></button>
         <div className="rail-spacer" />
         <button className={`rail-button ${authenticated ? 'signed-in' : ''}`} onClick={openAccount} title={authenticated ? 'บัญชี ChatGPT' : 'เข้าสู่ระบบ ChatGPT'}>{authenticated ? <Check size={18} /> : <LogIn size={18} />}</button>
       </aside>
@@ -669,15 +744,37 @@ function App() {
         </div>
       </aside>
     </main>
+    <AnimatePresence>{mcpOpen && <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="mcp-modal" initial={{ opacity: 0, scale: .97, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .98 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
+        <div className="mcp-heading"><div><span className="mcp-symbol"><Plug size={17} /></span><div><h2>ปลั๊กอิน MCP</h2><p>เชื่อมเครื่องมือภายนอกเข้ากับ Codex</p></div></div><div><button className="mcp-add" onClick={() => setMcpFormOpen(value => !value)}><Plus size={13} />เพิ่มเอง</button><button className="modal-close static" onClick={() => setMcpOpen(false)}><X size={16} /></button></div></div>
+        <div className="mcp-content">
+          <section className="mcp-presets"><span className="mcp-section-label">ติดตั้งด่วน</span><div>{MCP_PRESETS.map(preset => { const installed = mcpServers.some(server => server.name === preset.name); return <button key={preset.name} disabled={installed || mcpBusy || running} onClick={() => installPreset(preset)}><span><Server size={15} /></span><div><strong>{preset.label}</strong><small>{preset.description}</small></div><i>{installed ? 'ติดตั้งแล้ว' : 'ติดตั้ง'}</i></button> })}</div></section>
+          <AnimatePresence>{mcpFormOpen && <motion.section className="mcp-form" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
+            <div className="mcp-form-tabs"><button className={mcpForm.transport === 'http' ? 'active' : ''} onClick={() => setMcpForm(value => ({ ...value, transport: 'http' }))}><Globe2 size={12} />HTTP</button><button className={mcpForm.transport === 'stdio' ? 'active' : ''} onClick={() => setMcpForm(value => ({ ...value, transport: 'stdio' }))}><SquareTerminal size={12} />STDIO</button></div>
+            <input value={mcpForm.name} onChange={event => setMcpForm(value => ({ ...value, name: event.target.value }))} placeholder="ชื่อปลั๊กอิน" maxLength={40} />
+            {mcpForm.transport === 'http' ? <input value={mcpForm.url} onChange={event => setMcpForm(value => ({ ...value, url: event.target.value }))} placeholder="https://server.example.com/mcp" /> : <><input value={mcpForm.command} onChange={event => setMcpForm(value => ({ ...value, command: event.target.value }))} placeholder="คำสั่ง เช่น npx" /><textarea value={mcpForm.arguments} onChange={event => setMcpForm(value => ({ ...value, arguments: event.target.value }))} placeholder={'อาร์กิวเมนต์ บรรทัดละหนึ่งค่า\n-y\npackage-name'} /></>}
+            <button className="mcp-install" onClick={installMcp} disabled={mcpBusy || !mcpForm.name.trim() || (mcpForm.transport === 'http' ? !mcpForm.url.trim() : !mcpForm.command.trim())}>ติดตั้งปลั๊กอิน</button>
+          </motion.section>}</AnimatePresence>
+          <section className="mcp-installed"><span className="mcp-section-label">ติดตั้งแล้ว {mcpServers.length}</span>{mcpServers.length === 0 && !mcpBusy ? <div className="mcp-empty">ยังไม่มีปลั๊กอิน</div> : mcpServers.map(server => { const http = server.transport?.type === 'streamable_http'; const authenticated = ['authenticated', 'logged_in'].includes(String(server.auth_status || '').toLowerCase()); return <div className={`mcp-server ${server.enabled ? '' : 'disabled'}`} key={server.name}><span className="mcp-server-icon">{http ? <Globe2 size={15} /> : <SquareTerminal size={15} />}</span><div className="mcp-server-info"><strong>{server.name}</strong><small>{http ? server.transport.url : [server.transport?.command, ...(server.transport?.args || [])].filter(Boolean).join(' ')}</small></div><span className={`mcp-auth ${authenticated ? 'ready' : ''}`}>{authenticated ? 'เชื่อมแล้ว' : server.auth_status === 'unsupported' ? 'ไม่ต้องล็อกอิน' : 'ยังไม่เชื่อม'}</span><div className="mcp-server-actions">{http && server.auth_status !== 'unsupported' && <button onClick={() => runMcpAction(() => authenticated ? api.mcpLogout(server.name) : api.mcpLogin(server.name))} disabled={mcpBusy || running}>{authenticated ? 'ออกบัญชี' : 'เชื่อมบัญชี'}</button>}<button title={server.enabled ? 'ปิด' : 'เปิด'} onClick={() => runMcpAction(() => api.mcpToggle(server.name, !server.enabled))} disabled={mcpBusy || running}><Power size={13} /></button><button title="ถอนการติดตั้ง" onClick={() => confirm(`ถอนปลั๊กอิน ${server.name} หรือไม่`) && runMcpAction(() => api.mcpRemove(server.name))} disabled={mcpBusy || running}><Trash2 size={13} /></button></div></div> })}</section>
+          {mcpBusy && <div className="mcp-loading"><i />กำลังดำเนินการ</div>}
+          {mcpOutput && <pre className="mcp-output">{mcpOutput}</pre>}
+          {mcpError && <div className="mcp-error">{mcpError}</div>}
+        </div>
+        <div className="mcp-footer"><ShieldCheck size={12} /><span>ปลั๊กอินสามารถเข้าถึงข้อมูลตามสิทธิ์ที่คุณอนุมัติ</span></div>
+      </motion.div>
+    </motion.div>}</AnimatePresence>
     <AnimatePresence>{updateOpen && <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-      <motion.div className="update-modal" initial={{ opacity: 0, scale: .96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .97 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
+      <motion.div className="update-modal app-manager" initial={{ opacity: 0, scale: .96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .97 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
         <button className="modal-close" onClick={() => setUpdateOpen(false)}><X size={16} /></button>
-        <div className="update-brand"><div><Code2 size={18} /></div><span>CODEXDESK UPDATE</span></div>
+        <div className="update-brand"><div><Code2 size={18} /></div><span>CODEXDESK APP MANAGER</span></div>
         <h2>{updater.status === 'available' ? `พร้อมอัปเดตเป็น ${updater.version}` : updater.status === 'downloaded' ? 'พร้อมติดตั้งอัปเดต' : updater.status === 'current' ? 'เป็นเวอร์ชันล่าสุดแล้ว' : updater.status === 'error' ? 'ตรวจสอบอัปเดตไม่สำเร็จ' : updater.status === 'downloading' ? 'กำลังดาวน์โหลดอัปเดต' : 'กำลังตรวจสอบอัปเดต'}</h2>
         <p>{updater.status === 'downloaded' ? 'แอปจะปิดและเปิดใหม่หลังติดตั้งเสร็จ' : updater.status === 'available' ? 'ดาวน์โหลดเมื่อคุณกดยืนยันเท่านั้น' : updater.status === 'current' ? 'ยังไม่มีเวอร์ชันใหม่สำหรับติดตั้ง' : updater.status === 'error' ? 'ตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง' : 'กำลังเชื่อมต่อกับ GitHub Releases'}</p>
         <div className="update-progress"><i style={{ width: updater.status === 'downloading' ? `${updater.percent}%` : updater.status === 'downloaded' || updater.status === 'current' ? '100%' : updater.status === 'available' ? '35%' : '12%' }} /></div>
+        <div className="update-stages"><span className="done"><i><Check size={10} /></i>ติดตั้งแล้ว</span><span className={['available', 'downloading', 'downloaded'].includes(updater.status) ? 'done' : ''}><i>{['available', 'downloading', 'downloaded'].includes(updater.status) ? <Check size={10} /> : '2'}</i>ดาวน์โหลด</span><span className={updater.status === 'downloaded' ? 'done' : ''}><i>{updater.status === 'downloaded' ? <Check size={10} /> : '3'}</i>ติดตั้งใหม่</span></div>
         <div className="update-details"><span>เวอร์ชันปัจจุบัน</span><strong>{currentVersion || 'กำลังตรวจสอบ'}</strong><span>เวอร์ชันใหม่</span><strong>{updater.version || 'กำลังตรวจสอบ'}</strong></div>
+        {updater.notes && <div className="update-notes"><strong>รายการเปลี่ยนแปลง</strong><p>{updater.notes}</p></div>}
         <button className="update-primary" onClick={updateApp} disabled={['checking', 'downloading'].includes(updater.status)}>{updater.status === 'available' ? 'ดาวน์โหลดอัปเดต' : updater.status === 'downloaded' ? 'ติดตั้งและเปิดใหม่' : updater.status === 'current' ? 'ตรวจสอบอีกครั้ง' : updater.status === 'error' ? 'ลองอีกครั้ง' : updater.status === 'downloading' ? `ดาวน์โหลด ${updater.percent}%` : 'กำลังตรวจสอบ'}</button>
+        <button className="uninstall-button" onClick={uninstallApp}>ถอนการติดตั้ง CodexDesk</button>
         <span className="update-note">CodexDesk จะไม่ดาวน์โหลดหรือติดตั้งเอง</span>
       </motion.div>
     </motion.div>}</AnimatePresence>

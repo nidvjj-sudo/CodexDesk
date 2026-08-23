@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('codexDesk', {
   openProject: () => ipcRenderer.invoke('project:open'),
   getProject: () => ipcRenderer.invoke('project:get'),
   getVersion: () => ipcRenderer.invoke('app:version'),
+  appUninstall: () => ipcRenderer.invoke('app:uninstall'),
   listFiles: () => ipcRenderer.invoke('files:list'),
   readFile: path => ipcRenderer.invoke('files:read', path),
   writeFile: (path, content) => ipcRenderer.invoke('files:write', { path, content }),
@@ -20,6 +21,12 @@ contextBridge.exposeInMainWorld('codexDesk', {
   authStatus: () => ipcRenderer.invoke('auth:status'),
   authStart: mode => ipcRenderer.invoke('auth:start', mode),
   authLogout: () => ipcRenderer.invoke('auth:logout'),
+  mcpList: () => ipcRenderer.invoke('mcp:list'),
+  mcpAdd: payload => ipcRenderer.invoke('mcp:add', payload),
+  mcpRemove: name => ipcRenderer.invoke('mcp:remove', name),
+  mcpToggle: (name, enabled) => ipcRenderer.invoke('mcp:toggle', { name, enabled }),
+  mcpLogin: name => ipcRenderer.invoke('mcp:login', name),
+  mcpLogout: name => ipcRenderer.invoke('mcp:logout', name),
   openExternal: url => ipcRenderer.invoke('app:open-external', url),
   openLink: url => ipcRenderer.invoke('app:open-link', url),
   copyText: text => ipcRenderer.invoke('clipboard:write', text),
@@ -43,6 +50,11 @@ contextBridge.exposeInMainWorld('codexDesk', {
     const handler = (_, data) => callback(data)
     ipcRenderer.on('auth:event', handler)
     return () => ipcRenderer.removeListener('auth:event', handler)
+  },
+  onMcpEvent: callback => {
+    const handler = (_, data) => callback(data)
+    ipcRenderer.on('mcp:event', handler)
+    return () => ipcRenderer.removeListener('mcp:event', handler)
   },
   onUpdateEvent: callback => {
     const handler = (_, data) => callback(data)

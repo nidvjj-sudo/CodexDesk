@@ -196,6 +196,7 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 18px; background: #000b; backdrop-filter: blur(12px); }
 .auth-modal { position: relative; width: min(390px, 100%); min-height: 290px; padding: 31px; border: 1px solid #35353a; border-radius: 18px; background: linear-gradient(145deg, #151517, #0f0f11); box-shadow: 0 30px 100px #000; text-align: center; }
 .update-modal { position: relative; width: min(420px, 100%); padding: 30px; overflow: hidden; border: 1px solid #35353a; border-radius: 18px; background: linear-gradient(145deg, #151517, #0c0c0e); box-shadow: 0 30px 100px #000; }
+.update-modal.app-manager { width: min(460px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
 .update-modal::before { content: ''; position: absolute; inset: 0 0 auto; height: 1px; background: linear-gradient(90deg, transparent, #fff8, transparent); }
 .update-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; color: #85858b; font: 600 9px/1 "Cascadia Mono", Consolas, monospace; letter-spacing: 1.6px; }
 .update-brand > div { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #3b3b40; border-radius: 10px; background: #1a1a1d; color: #e5e5e8; }
@@ -206,9 +207,68 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .update-details { display: grid; grid-template-columns: 1fr auto; gap: 9px 16px; padding: 14px; border: 1px solid #29292d; border-radius: 10px; background: #0a0a0b; font-size: 9.5px; }
 .update-details span { color: #737379; }
 .update-details strong { color: #c6c6ca; font: 600 9.5px "Cascadia Mono", Consolas, monospace; }
+.update-stages { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: -3px 0 18px; }
+.update-stages span { display: flex; align-items: center; gap: 6px; color: #5f5f65; font-size: 8px; }
+.update-stages i { width: 17px; height: 17px; display: grid; place-items: center; border: 1px solid #343439; border-radius: 50%; color: #717177; font: 7px "Cascadia Mono", Consolas, monospace; }
+.update-stages span.done { color: #bdbdc2; }
+.update-stages span.done i { border-color: #d8d8dc; background: #e7e7ea; color: #111; }
+.update-notes { max-height: 105px; margin-top: 10px; overflow: auto; padding: 12px; border: 1px solid #29292d; border-radius: 10px; background: #0a0a0b; }
+.update-notes strong { display: block; margin-bottom: 7px; color: #a8a8ad; font-size: 8.5px; }
+.update-notes p { margin: 0; color: #707076; font-size: 8.5px; line-height: 1.6; white-space: pre-wrap; }
 .update-primary { width: 100%; height: 42px; margin-top: 18px; border: 0; border-radius: 9px; background: #ededf0; color: #111; font-size: 10.5px; font-weight: 600; cursor: pointer; }
 .update-primary:disabled { opacity: .5; cursor: default; }
+.uninstall-button { width: 100%; height: 36px; margin-top: 8px; border: 1px solid #303034; border-radius: 9px; background: transparent; color: #85858b; font-size: 9px; cursor: pointer; }
+.uninstall-button:hover { border-color: #505056; background: #19191c; color: #d0d0d4; }
 .update-note { display: block; margin-top: 12px; color: #66666c; font-size: 8.5px; text-align: center; }
+.mcp-modal { width: min(760px, 100%); max-height: min(780px, calc(100vh - 36px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid #35353a; border-radius: 18px; background: linear-gradient(145deg, #141416, #09090a); box-shadow: 0 30px 100px #000; }
+.mcp-heading { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px 20px; border-bottom: 1px solid #29292d; }
+.mcp-heading > div { display: flex; align-items: center; gap: 11px; }
+.mcp-heading h2 { margin: 0 0 4px; color: #eeeef0; font-size: 15px; }
+.mcp-heading p { margin: 0; color: #77777d; font-size: 9px; }
+.mcp-symbol { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid #38383d; border-radius: 11px; background: #1b1b1e; color: #e4e4e7; }
+.modal-close.static { position: static; flex: 0 0 30px; }
+.mcp-add { height: 31px; display: flex; align-items: center; gap: 6px; padding: 0 11px; border: 1px solid #39393e; border-radius: 8px; background: #1c1c1f; color: #c9c9cd; font-size: 9px; cursor: pointer; }
+.mcp-content { flex: 1; min-height: 0; overflow: auto; padding: 18px 20px 28px; }
+.mcp-section-label { display: block; margin: 0 0 9px; color: #717177; font-size: 8px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; }
+.mcp-presets > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mcp-presets button { min-width: 0; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 11px; border: 1px solid #2e2e32; border-radius: 10px; background: #111113; color: #bdbdc2; text-align: left; cursor: pointer; }
+.mcp-presets button:hover:not(:disabled) { border-color: #48484e; background: #19191c; }
+.mcp-presets button:disabled { opacity: .55; cursor: default; }
+.mcp-presets button > span { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid #333338; border-radius: 8px; background: #1b1b1e; }
+.mcp-presets button > div { min-width: 0; }
+.mcp-presets strong, .mcp-presets small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-presets strong { margin-bottom: 4px; color: #dedee1; font-size: 9.5px; }
+.mcp-presets small { color: #68686e; font-size: 7.5px; }
+.mcp-presets i { color: #89898f; font-size: 7.5px; font-style: normal; }
+.mcp-form { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 8px; margin-top: 12px; overflow: hidden; padding: 12px; border: 1px solid #303034; border-radius: 10px; background: #0b0b0c; }
+.mcp-form-tabs { display: flex; overflow: hidden; border: 1px solid #303034; border-radius: 8px; }
+.mcp-form-tabs button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; border: 0; background: transparent; color: #68686e; font-size: 8px; cursor: pointer; }
+.mcp-form-tabs button.active { background: #222226; color: #dddde0; }
+.mcp-form input, .mcp-form textarea { min-width: 0; padding: 0 10px; border: 1px solid #303034; border-radius: 8px; outline: 0; background: #121214; color: #dddde0; font: 9px "Cascadia Mono", Consolas, monospace; }
+.mcp-form input { height: 34px; }
+.mcp-form textarea { grid-column: 2; min-height: 66px; padding-block: 9px; resize: vertical; }
+.mcp-install { min-width: 105px; border: 0; border-radius: 8px; background: #e7e7ea; color: #111; font-size: 8.5px; font-weight: 600; cursor: pointer; }
+.mcp-install:disabled { opacity: .4; cursor: default; }
+.mcp-installed { margin-top: 20px; }
+.mcp-server { min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 10px; border-bottom: 1px solid #242427; }
+.mcp-server.disabled { opacity: .5; }
+.mcp-server-icon { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #303034; border-radius: 8px; background: #161618; color: #aaaab0; }
+.mcp-server-info { min-width: 0; }
+.mcp-server-info strong, .mcp-server-info small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-server-info strong { margin-bottom: 4px; color: #d5d5d8; font-size: 10px; }
+.mcp-server-info small { color: #66666c; font: 7.5px "Cascadia Mono", Consolas, monospace; }
+.mcp-auth { padding: 4px 7px; border-radius: 10px; background: #222226; color: #77777d; font-size: 7.5px; white-space: nowrap; }
+.mcp-auth.ready { background: #e8e8eb; color: #111; }
+.mcp-server-actions { display: flex; align-items: center; gap: 5px; }
+.mcp-server-actions button { min-width: 29px; height: 29px; display: grid; place-items: center; padding: 0 8px; border: 1px solid #303034; border-radius: 7px; background: transparent; color: #85858b; font-size: 8px; cursor: pointer; }
+.mcp-server-actions button:hover:not(:disabled) { background: #1d1d20; color: #ddd; }
+.mcp-server-actions button:disabled { opacity: .35; cursor: default; }
+.mcp-empty { padding: 25px; border: 1px dashed #2d2d31; border-radius: 10px; color: #66666c; font-size: 9px; text-align: center; }
+.mcp-loading { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px; color: #77777d; font-size: 9px; }
+.mcp-loading i { width: 12px; height: 12px; border: 1px solid #55555b; border-top-color: #eee; border-radius: 50%; animation: spin .8s linear infinite; }
+.mcp-output, .mcp-error { max-height: 80px; margin: 10px 0 0; overflow: auto; padding: 9px; border: 1px solid #2c2c30; border-radius: 8px; background: #09090a; color: #89898f; font: 8px/1.5 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; }
+.mcp-error { color: #c5c5c9; }
+.mcp-footer { min-height: 39px; display: flex; align-items: center; gap: 7px; padding: 0 20px; border-top: 1px solid #29292d; color: #66666c; font-size: 8px; }
 .modal-close { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: #77777d; cursor: pointer; }
 .modal-close:hover { background: #1d1d20; color: #ddd; }
 .auth-symbol { width: 47px; height: 47px; display: grid; place-items: center; margin: 3px auto 15px; border: 1px solid #3b3b40; border-radius: 14px; background: #19191c; box-shadow: inset 0 1px #ffffff0a; }
@@ -281,6 +341,16 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
   .composer-options { gap: 7px; }
   .permission, .approval-mode { font-size: 8px; }
   .auth-modal { padding: 27px 22px; }
+  .mcp-modal { max-height: calc(100vh - 20px); }
+  .mcp-heading { padding: 13px; }
+  .mcp-content { padding: 13px; }
+  .mcp-presets > div { grid-template-columns: 1fr; }
+  .mcp-form { grid-template-columns: 1fr; }
+  .mcp-form textarea { grid-column: 1; }
+  .mcp-install { min-height: 34px; }
+  .mcp-server { grid-template-columns: 34px minmax(0, 1fr) auto; }
+  .mcp-auth { display: none; }
+  .mcp-server-actions { grid-column: 2 / 4; justify-content: flex-end; }
 }
 
 @keyframes pulse { 50% { opacity: .42; } }
