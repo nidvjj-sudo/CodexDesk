@@ -2,6 +2,10 @@
 
 แอป Electron สำหรับใช้งาน Codex CLI กับโปรเจกต์ในเครื่อง
 
+## ดาวน์โหลด
+
+ดาวน์โหลด Setup เวอร์ชันล่าสุดจาก https://github.com/nidvjj-sudo/CodexDesk/releases/latest
+
 ## ติดตั้ง
 
 1. ติดตั้ง Node.js LTS x64
