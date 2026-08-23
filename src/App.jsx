@@ -3,7 +3,7 @@ import Editor from '@monaco-editor/react'
 import { motion, AnimatePresence } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Copy, Download, ExternalLink, File, Folder, FolderOpen, GitCompare, ListTodo, LogIn, RefreshCw, Save, Send, Settings2, Trash2, X } from 'lucide-react'
+import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Copy, Download, ExternalLink, File, Folder, FolderOpen, GitCompare, ListTodo, LogIn, RefreshCw, Save, Send, Settings2, ShieldCheck, Trash2, X } from 'lucide-react'
 
 const api = window.codexDesk
 
@@ -40,6 +40,7 @@ function App() {
   const [diff, setDiff] = useState('')
   const [prompt, setPrompt] = useState('')
   const [allowEdit, setAllowEdit] = useState(true)
+  const [approvalMode, setApprovalMode] = useState('ask')
   const [running, setRunning] = useState(false)
   const [events, setEvents] = useState([])
   const [authenticated, setAuthenticated] = useState(false)
@@ -51,6 +52,7 @@ function App() {
   const [queue, setQueue] = useState([])
   const [activity, setActivity] = useState([])
   const [activityOpen, setActivityOpen] = useState(false)
+  const [mobileView, setMobileView] = useState('chat')
   const [sessionId, setSessionId] = useState(null)
   const [historyReady, setHistoryReady] = useState(false)
   const codexBuffer = useRef('')
@@ -207,6 +209,7 @@ function App() {
       setCurrentFile(node)
       setContent(text)
       setSavedContent(text)
+      setMobileView('editor')
     } catch (error) {
       alert(error.message)
     }
@@ -294,6 +297,7 @@ function App() {
   function sendPrompt() {
     const text = prompt.trim()
     if (!text || !project) return
+    if (allowEdit && approvalMode === 'ask' && !confirm('อนุญาตให้ Codex แก้ไขไฟล์และรันคำสั่งสำหรับงานนี้หรือไม่')) return
     const task = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text, allowEdit }
     setPrompt('')
     setEvents(items => [...items, { id: task.id, kind: 'user', text, queued: runningRef.current }])
@@ -336,10 +340,12 @@ function App() {
       </div>
     </header>
 
-    <main className="workspace">
+    <main className={`workspace view-${mobileView}`}>
       <aside className="rail">
-        <button className="rail-button active"><Code2 size={18} /></button>
-        <button className="rail-button" onClick={loadDiff}><GitCompare size={18} /></button>
+        <button className={`rail-button ${mobileView === 'files' ? 'active' : ''}`} onClick={() => setMobileView('files')} title="ไฟล์"><FolderOpen size={18} /></button>
+        <button className={`rail-button ${mobileView === 'editor' ? 'active' : ''}`} onClick={() => setMobileView('editor')} title="ตัวแก้ไขโค้ด"><Code2 size={18} /></button>
+        <button className={`rail-button ${mobileView === 'chat' ? 'active' : ''}`} onClick={() => setMobileView('chat')} title="Codex"><Bot size={18} /></button>
+        <button className="rail-button" onClick={() => { setMobileView('editor'); loadDiff() }} title="Git Diff"><GitCompare size={18} /></button>
         <div className="rail-spacer" />
         <button className={`rail-button ${authenticated ? 'signed-in' : ''}`} onClick={openAccount}>{authenticated ? <Check size={18} /> : <LogIn size={18} />}</button>
         <button className="rail-button"><Settings2 size={18} /></button>
@@ -383,7 +389,10 @@ function App() {
           <textarea value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendPrompt() } }} placeholder={project ? 'สั่งงาน Codex…' : 'เปิดโปรเจกต์ก่อน'} disabled={!project} />
           {queue.length > 0 && <div className="queue-indicator">มี {queue.length} ข้อความรอทำงาน</div>}
           <div className="composer-footer">
-            <button className="permission" onClick={() => setAllowEdit(value => !value)}><span className={allowEdit ? 'enabled' : ''} />{allowEdit ? 'แก้ไขไฟล์ได้' : 'อ่านอย่างเดียว'}</button>
+            <div className="composer-options">
+              <button className="permission" onClick={() => setAllowEdit(value => !value)}><span className={allowEdit ? 'enabled' : ''} />{allowEdit ? 'แก้ไขไฟล์ได้' : 'อ่านอย่างเดียว'}</button>
+              <button className="approval-mode" onClick={() => setApprovalMode(value => value === 'ask' ? 'auto' : 'ask')} title="รูปแบบการอนุมัติ"><ShieldCheck size={13} />{approvalMode === 'ask' ? 'ถามก่อน' : 'อัตโนมัติ'}</button>
+            </div>
             <button className="send-button" onClick={sendPrompt} disabled={!prompt.trim() || !project}><Send size={15} /></button>
           </div>
         </div>

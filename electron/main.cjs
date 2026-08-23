@@ -36,8 +36,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1540,
     height: 940,
-    minWidth: 1080,
-    minHeight: 680,
+    minWidth: 720,
+    minHeight: 560,
     backgroundColor: '#080808',
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#080808', symbolColor: '#d8d8d8', height: 44 },
@@ -61,7 +61,7 @@ function publishUpdateState(next) {
 function setupAutoUpdater() {
   if (!app.isPackaged) return
   autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.on('checking-for-update', () => publishUpdateState({ status: 'checking', percent: 0 }))
   autoUpdater.on('update-available', info => publishUpdateState({ status: 'available', version: info.version, percent: 0 }))
   autoUpdater.on('update-not-available', () => publishUpdateState({ status: 'current', version: app.getVersion(), percent: 0 }))
