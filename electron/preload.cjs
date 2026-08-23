@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('codexDesk', {
   removeAttachments: paths => ipcRenderer.invoke('attachments:remove', paths),
   historyGet: () => ipcRenderer.invoke('history:get'),
   historySave: payload => ipcRenderer.invoke('history:save', payload),
+  historyAppend: payload => ipcRenderer.invoke('history:append', payload),
   historyList: () => ipcRenderer.invoke('history:list'),
   historyNew: () => ipcRenderer.invoke('history:new'),
   historyOpen: id => ipcRenderer.invoke('history:open', id),
@@ -43,7 +44,7 @@ contextBridge.exposeInMainWorld('codexDesk', {
   updateDownload: () => ipcRenderer.invoke('update:download'),
   updateInstall: () => ipcRenderer.invoke('update:install'),
   codexRun: options => ipcRenderer.invoke('codex:run', options),
-  codexStop: () => ipcRenderer.invoke('codex:stop'),
+  codexStop: conversationId => ipcRenderer.invoke('codex:stop', conversationId),
   onCodexEvent: callback => {
     const handler = (_, data) => callback(data)
     ipcRenderer.on('codex:event', handler)

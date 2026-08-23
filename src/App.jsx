@@ -133,16 +133,17 @@ function MarkdownMessage({ onOpenFile, text }) {
 function extractResponseArtifact(events) {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
-    if (event.kind === 'user' || event.kind === 'system' || !event.text) continue
+    if (event.kind !== 'agent_message' || !event.text) continue
     const blocks = [...event.text.matchAll(/```([^\n`]*)\n([\s\S]*?)```/g)]
-    if (!blocks.length) continue
+    if (!blocks.length) return null
     const block = blocks.at(-1)
-    const language = block[1].trim().toLowerCase() || 'text'
+    const language = block[1].trim().toLowerCase() || 'plaintext'
+    if (['text', 'txt', 'markdown', 'md'].includes(language)) return null
     return {
       id: `${event.id || index}-${blocks.length}`,
       content: block[2].replace(/\n$/, ''),
       language,
-      type: ['text', 'txt', 'markdown', 'md'].includes(language) ? 'text' : 'code'
+      type: 'code'
     }
   }
   return null
@@ -251,7 +252,7 @@ function App() {
   const [prompt, setPrompt] = useState('')
   const [allowEdit, setAllowEdit] = useState(true)
   const [approvalMode, setApprovalMode] = useState('ask')
-  const [running, setRunning] = useState(false)
+  const [runningChats, setRunningChats] = useState({})
   const [events, setEvents] = useState([])
   const [notices, setNotices] = useState([])
   const [authenticated, setAuthenticated] = useState(false)
@@ -288,10 +289,13 @@ function App() {
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [attachments, setAttachments] = useState([])
   const [attachmentBusy, setAttachmentBusy] = useState(false)
-  const codexBuffer = useRef('')
+  const codexBuffers = useRef(new Map())
   const conversationEnd = useRef(null)
-  const runningRef = useRef(false)
-  const queueRef = useRef([])
+  const runningChatsRef = useRef(new Set())
+  const queuesByChat = useRef(new Map())
+  const sessionsByChat = useRef(new Map())
+  const activitiesByChat = useRef(new Map())
+  const conversationIdRef = useRef(null)
   const leftCtrlPressed = useRef(false)
   const sessionIdRef = useRef(null)
   const workspacePromise = useRef(null)
@@ -301,8 +305,11 @@ function App() {
   const artifactEvent = useRef(null)
   const openedChange = useRef(null)
   const usageRequestId = useRef(0)
+  const usageRefreshing = useRef(false)
 
   const t = (english, thai) => settings.language === 'th' ? thai : english
+  const running = Boolean(conversationId && runningChats[conversationId])
+  const hasRunningChats = Object.keys(runningChats).length > 0
   const dirty = currentFile && content !== savedContent
   const commandSuggestions = prompt.startsWith('/') && !prompt.includes('\n') ? CHAT_COMMANDS.filter(command => command.name.startsWith(prompt.split(/\s+/)[0].toLowerCase())).slice(0, 7) : []
   const liveActivity = activity.slice().reverse().find(item => item.status === 'running') || activity.at(-1)
@@ -313,10 +320,14 @@ function App() {
   const responseArtifact = useMemo(() => extractResponseArtifact(events), [events])
 
   useEffect(() => {
-    if (!responseArtifact || responseArtifact.id === artifactEvent.current) return
+    if (!responseArtifact) {
+      if (artifactView === 'response') setArtifactView(null)
+      return
+    }
+    if (responseArtifact.id === artifactEvent.current) return
     artifactEvent.current = responseArtifact.id
     setArtifactView('response')
-  }, [responseArtifact?.id])
+  }, [responseArtifact?.id, artifactView])
 
   useEffect(() => {
     if (running || dirty || !project) return
@@ -382,17 +393,17 @@ function App() {
       return undefined
     }
     void refreshWeeklyUsage()
-    const timer = window.setInterval(() => void refreshWeeklyUsage(false), 5 * 60 * 1000)
+    const timer = window.setInterval(() => void refreshWeeklyUsage(false), 1000)
     return () => window.clearInterval(timer)
   }, [authenticated])
 
   useEffect(() => api.onCodexEvent(event => {
     if (event.type === 'done') {
-      parseCodexOutput('', true)
+      parseCodexOutput('', true, event.conversationId)
       if (authenticated) window.setTimeout(() => void refreshWeeklyUsage(false), 1000)
     }
-    if (event.type === 'stdout') parseCodexOutput(event.data)
-    if (event.type === 'stderr' || event.type === 'error') setEvents(items => [...items, { kind: 'error', text: event.data }])
+    if (event.type === 'stdout') parseCodexOutput(event.data, false, event.conversationId)
+    if (event.type === 'stderr' || event.type === 'error') appendChatEvents(event.conversationId, [{ kind: 'error', text: event.data }])
   }), [settings.language, authenticated])
 
   useEffect(() => {
@@ -440,7 +451,13 @@ function App() {
     conversationEnd.current?.scrollIntoView({ behavior: running ? 'smooth' : 'auto', block: 'end' })
   }, [events, running, settings.autoScroll])
 
+  useEffect(() => {
+    if (conversationId) activitiesByChat.current.set(conversationId, activity)
+  }, [conversationId, activity])
+
   async function refreshWeeklyUsage(showLoading = true) {
+    if (usageRefreshing.current) return
+    usageRefreshing.current = true
     const requestId = ++usageRequestId.current
     if (showLoading) setWeeklyUsage(current => ({ ...current, status: 'loading' }))
     try {
@@ -448,6 +465,8 @@ function App() {
       if (requestId === usageRequestId.current) setWeeklyUsage(usage)
     } catch {
       if (requestId === usageRequestId.current) setWeeklyUsage({ status: 'unavailable' })
+    } finally {
+      usageRefreshing.current = false
     }
   }
 
@@ -505,7 +524,7 @@ function App() {
   }
 
   async function runMcpAction(action) {
-    if (mcpBusy || running) return false
+    if (mcpBusy || hasRunningChats) return false
     setMcpBusy(true)
     setMcpError('')
     setMcpOutput('')
@@ -627,15 +646,16 @@ function App() {
     const historyList = await api.historyList()
     setFiles(nextFiles)
     setUndoStack(undoHistory)
-    setConversationId(history.conversationId)
     setConversations(historyList)
-    sessionIdRef.current = history.sessionId || null
-    setSessionId(history.sessionId || null)
-    setEvents((history.events || []).filter(event => event.kind !== 'system').map(event => ({ ...event, queued: false })))
+    applyConversation(history)
     setHistoryReady(true)
   }
 
   async function openProject() {
+    if (hasRunningChats) {
+      addSystemMessage(t('Stop all running chats before changing the project.', 'กรุณาหยุดแชทที่กำลังทำงานทั้งหมดก่อนเปลี่ยนโปรเจกต์'))
+      return
+    }
     if (project && historyReady) await api.historySave({ conversationId, events, sessionId }).catch(() => {})
     setHistoryReady(false)
     const value = await api.openProject()
@@ -643,7 +663,7 @@ function App() {
       setCurrentFile(null)
       setContent('')
       setSavedContent('')
-      queueRef.current = []
+      queuesByChat.current.clear()
       setQueue([])
       setActivity([])
       await loadProject(value)
@@ -725,32 +745,57 @@ function App() {
     setArtifactView('diff')
   }
 
-  function parseCodexOutput(raw, flush = false) {
-    codexBuffer.current += raw
-    const lines = codexBuffer.current.split(/\r?\n/)
+  function setChatRunning(chatId, value) {
+    if (!chatId) return
+    if (value) runningChatsRef.current.add(chatId)
+    else runningChatsRef.current.delete(chatId)
+    setRunningChats(Object.fromEntries([...runningChatsRef.current].map(id => [id, true])))
+  }
+
+  function appendChatEvents(chatId, additions, nextSessionId = null) {
+    if (!chatId || (!additions.length && !nextSessionId)) return
+    if (nextSessionId) sessionsByChat.current.set(chatId, nextSessionId)
+    if (chatId === conversationIdRef.current) {
+      if (nextSessionId) {
+        sessionIdRef.current = nextSessionId
+        setSessionId(nextSessionId)
+      }
+      if (additions.length) setEvents(items => [...items, ...additions])
+    } else {
+      void api.historyAppend({ conversationId: chatId, events: additions, sessionId: nextSessionId }).then(() => api.historyList()).then(setConversations).catch(() => {})
+    }
+  }
+
+  function parseCodexOutput(raw, flush = false, chatId = conversationIdRef.current) {
+    if (!chatId) return
+    const buffered = (codexBuffers.current.get(chatId) || '') + raw
+    const lines = buffered.split(/\r?\n/)
     const tail = lines.pop() ?? ''
-    codexBuffer.current = flush ? '' : tail
+    if (flush) codexBuffers.current.delete(chatId)
+    else codexBuffers.current.set(chatId, tail)
     if (flush && tail) lines.push(tail)
+    const additions = []
+    let nextSessionId = null
     for (const line of lines.filter(Boolean)) {
       try {
         const event = JSON.parse(line)
         if (event.type === 'thread.started' && event.thread_id) {
-          sessionIdRef.current = event.thread_id
-          setSessionId(event.thread_id)
+          nextSessionId = event.thread_id
         }
         if (event.type === 'item.completed' && event.item?.type === 'agent_message' && event.item.text) {
-          setEvents(items => [...items, { kind: 'agent_message', text: event.item.text }])
+          additions.push({ kind: 'agent_message', text: event.item.text })
         }
-        if (event.item && event.item.type !== 'agent_message') updateActivity(event)
+        if (chatId === conversationIdRef.current && event.item && event.item.type !== 'agent_message') updateActivity(event)
         if (event.type === 'error') {
-          setEvents(items => [...items, { kind: 'error', text: event.message || t('Codex could not complete the task.', 'Codex ทำงานไม่สำเร็จ') }])
+          additions.push({ kind: 'error', text: event.message || t('Codex could not complete the task.', 'Codex ทำงานไม่สำเร็จ') })
         }
       } catch {
         if (!/codex_core|Wall time:|Exit code:|rejected: blocked by policy/i.test(line)) {
-          setEvents(items => [...items, { kind: 'output', text: line }])
+          additions.push({ kind: 'output', text: line })
         }
       }
     }
+    appendChatEvents(chatId, additions, nextSessionId)
   }
 
   function updateActivity(event) {
@@ -805,34 +850,36 @@ function App() {
     await api.removeAttachments(target.paths).catch(() => {})
   }
 
-  async function executeTask(task) {
-    runningRef.current = true
-    setRunning(true)
-    setEvents(items => items.map(event => event.id === task.id ? { ...event, queued: false } : event))
-    setActivity(items => [...items.slice(-99), { id: `task-${task.id}`, type: 'task', title: task.text, output: '', status: 'running' }])
+  async function executeTask(task, chatId) {
+    setChatRunning(chatId, true)
+    if (chatId === conversationIdRef.current) {
+      setEvents(items => items.map(event => event.id === task.id ? { ...event, queued: false } : event))
+      setActivity(items => [...items.slice(-99), { id: `task-${task.id}`, type: 'task', title: task.text, output: '', status: 'running' }])
+    }
     let completed = false
     try {
       if (task.allowEdit) {
         const snapshot = await api.undoCreate(task.text)
         setUndoStack(items => [snapshot, ...items].slice(0, 10))
       }
-      const result = await api.codexRun({ prompt: task.text, allowEdit: task.allowEdit, sessionId: sessionIdRef.current, attachments: task.attachments })
+      const result = await api.codexRun({ conversationId: chatId, prompt: task.text, allowEdit: task.allowEdit, sessionId: sessionsByChat.current.get(chatId) || null, attachments: task.attachments })
       completed = result.code === 0
       await refreshFiles()
-      await loadDiff()
+      if (chatId === conversationIdRef.current) await loadDiff()
     } catch (error) {
-      setEvents(items => [...items, { kind: 'error', text: error.message }])
+      appendChatEvents(chatId, [{ kind: 'error', text: error.message }])
     } finally {
       if (task.attachments?.length) await api.removeAttachments(task.attachments).catch(() => {})
     }
-    setActivity(items => items.map(item => item.id === `task-${task.id}` ? { ...item, status: completed ? 'completed' : 'failed' } : item))
-    const next = queueRef.current.shift()
-    setQueue([...queueRef.current])
+    if (chatId === conversationIdRef.current) setActivity(items => items.map(item => item.id === `task-${task.id}` ? { ...item, status: completed ? 'completed' : 'failed' } : item))
+    const chatQueue = queuesByChat.current.get(chatId) || []
+    const next = chatQueue.shift()
+    queuesByChat.current.set(chatId, chatQueue)
+    if (chatId === conversationIdRef.current) setQueue([...chatQueue])
     if (next) {
-      void executeTask(next)
+      void executeTask(next, chatId)
     } else {
-      runningRef.current = false
-      setRunning(false)
+      setChatRunning(chatId, false)
     }
   }
 
@@ -856,18 +903,23 @@ function App() {
     const submitted = attachments
     const request = text || t('Analyze the attached media.', 'วิเคราะห์สื่อที่แนบมา')
     const attachmentPaths = submitted.flatMap(item => item.paths)
+    const chatId = conversationIdRef.current
+    if (!chatId) return
     const task = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text: request, allowEdit, attachments: attachmentPaths }
     setPrompt('')
     setAttachments([])
     submitted.forEach(item => URL.revokeObjectURL(item.preview))
     const attachmentLabel = submitted.length ? `\n\n${t('Attachments', 'ไฟล์แนบ')}: ${submitted.map(item => item.name).join(', ')}` : ''
-    setEvents(items => [...items, { id: task.id, kind: 'user', text: `${request}${attachmentLabel}`, queued: runningRef.current }])
-    if (runningRef.current) {
-      queueRef.current.push(task)
-      setQueue([...queueRef.current])
+    const chatRunning = runningChatsRef.current.has(chatId)
+    setEvents(items => [...items, { id: task.id, kind: 'user', text: `${request}${attachmentLabel}`, queued: chatRunning }])
+    if (chatRunning) {
+      const chatQueue = queuesByChat.current.get(chatId) || []
+      chatQueue.push(task)
+      queuesByChat.current.set(chatId, chatQueue)
+      setQueue([...chatQueue])
       return
     }
-    void executeTask(task)
+    void executeTask(task, chatId)
   }
 
   function dismissNotice(id) {
@@ -1003,25 +1055,31 @@ function App() {
   }
 
   function stopCodex() {
-    const pendingAttachments = queueRef.current.flatMap(task => task.attachments || [])
-    queueRef.current = []
+    const chatId = conversationIdRef.current
+    if (!chatId) return
+    const chatQueue = queuesByChat.current.get(chatId) || []
+    const pendingAttachments = chatQueue.flatMap(task => task.attachments || [])
+    queuesByChat.current.set(chatId, [])
     setQueue([])
     if (pendingAttachments.length) void api.removeAttachments(pendingAttachments)
-    api.codexStop()
+    api.codexStop(chatId)
   }
 
   function applyConversation(history) {
+    conversationIdRef.current = history.conversationId
+    sessionsByChat.current.set(history.conversationId, history.sessionId || null)
     sessionIdRef.current = history.sessionId || null
     setSessionId(history.sessionId || null)
     setConversationId(history.conversationId)
     setEvents((history.events || []).filter(event => event.kind !== 'system').map(event => ({ ...event, queued: false })))
-    setActivity([])
+    setActivity(activitiesByChat.current.get(history.conversationId) || [])
+    setQueue([...(queuesByChat.current.get(history.conversationId) || [])])
   }
 
   async function newChat() {
-    if (running) return
     if (!project) await ensureWorkspace()
     setHistoryReady(false)
+    conversationIdRef.current = null
     await api.historySave({ conversationId, events, sessionId }).catch(() => {})
     const history = await api.historyNew()
     applyConversation(history)
@@ -1031,8 +1089,9 @@ function App() {
   }
 
   async function openConversation(id) {
-    if (running || id === conversationId) return
+    if (id === conversationIdRef.current) return
     setHistoryReady(false)
+    conversationIdRef.current = null
     await api.historySave({ conversationId, events, sessionId }).catch(() => {})
     const history = await api.historyOpen(id)
     applyConversation(history)
@@ -1051,7 +1110,7 @@ function App() {
   }
 
   async function deleteConversation(id) {
-    if (running || !id || !confirm(t('Delete this chat? This cannot be undone.', 'ลบแชทนี้หรือไม่ การลบไม่สามารถย้อนกลับได้'))) return
+    if (runningChatsRef.current.has(id) || !id || !confirm(t('Delete this chat? This cannot be undone.', 'ลบแชทนี้หรือไม่ การลบไม่สามารถย้อนกลับได้'))) return
     const deletingCurrent = id === conversationId
     if (deletingCurrent) setHistoryReady(false)
     try {
@@ -1096,7 +1155,7 @@ function App() {
   }
 
   async function signOut() {
-    if (!authenticated || running) return
+    if (!authenticated || hasRunningChats) return
     if (!confirm(t('Sign out of ChatGPT in CodexDesk?', 'ออกจากระบบ ChatGPT ใน CodexDesk หรือไม่'))) return
     try {
       await api.authLogout()
@@ -1120,21 +1179,21 @@ function App() {
       <div className="title-actions">
         <button className={`update-button ${updater.status}`} onClick={openUpdate}>{updater.status === 'downloaded' || updater.status === 'available' ? <Download size={13} /> : <RefreshCw size={13} />}<span>{updateLabel}</span></button>
         <button className={`account-button ${authenticated ? 'connected' : ''}`} onClick={openAccount}>{authenticated ? <Check size={13} /> : <LogIn size={13} />}<span>{authenticated ? t('Connected', 'เชื่อมต่อแล้ว') : t('Connect ChatGPT', 'เชื่อมต่อ ChatGPT')}</span></button>
-        <span className={`status-dot ${running ? 'active' : ''}`} /><span>{running ? t('Working', 'กำลังทำงาน') : t('Ready', 'พร้อมใช้งาน')}</span>
+        <span className={`status-dot ${hasRunningChats ? 'active' : ''}`} /><span>{hasRunningChats ? t('Working', 'กำลังทำงาน') : t('Ready', 'พร้อมใช้งาน')}</span>
       </div>
     </header>
 
     <main className={`workspace view-${mobileView} ${artifactView ? 'artifact-open' : ''}`}>
       <aside className="chat-sidebar">
         <div className="sidebar-logo"><span><Code2 size={16} /></span><strong>CodexDesk</strong></div>
-        <button className="sidebar-new" onClick={newChat} disabled={running}><FilePenLine size={16} /><span>{t('New chat', 'แชทใหม่')}</span><Plus size={14} /></button>
+        <button className="sidebar-new" onClick={newChat}><FilePenLine size={16} /><span>{t('New chat', 'แชทใหม่')}</span><Plus size={14} /></button>
         <nav className="sidebar-nav">
           <button className="active" onClick={() => setMobileView('chat')}><Bot size={16} /><span>Codex</span></button>
           <button onClick={() => { setArtifactView('files'); setMobileView('files') }}><FolderOpen size={16} /><span>{t('Files', 'ไฟล์')}</span></button>
           <button onClick={() => void loadDiff()}><GitCompare size={16} /><span>{t('Changes', 'การเปลี่ยนแปลง')}</span></button>
           <button onClick={openMcp}><Plug size={16} /><span>{t('Plugins', 'ปลั๊กอิน')}</span></button>
         </nav>
-        <div className="sidebar-recents"><div className="sidebar-section-title"><span>{t('Recents', 'ล่าสุด')}</span><Search size={13} /></div><div className="sidebar-history">{conversations.map(item => <div className={`sidebar-history-item ${item.conversationId === conversationId ? 'active' : ''}`} key={item.conversationId}><button onClick={() => openConversation(item.conversationId)} disabled={running}><span>{item.title}</span></button><button onClick={() => deleteConversation(item.conversationId)} disabled={running} title={t('Delete chat', 'ลบแชท')}><Trash2 size={12} /></button></div>)}{conversations.length === 0 && <div className="sidebar-empty">{t('No chats yet', 'ยังไม่มีแชท')}</div>}</div></div>
+        <div className="sidebar-recents"><div className="sidebar-section-title"><span>{t('Recents', 'ล่าสุด')}</span><Search size={13} /></div><div className="sidebar-history">{conversations.map(item => <div className={`sidebar-history-item ${item.conversationId === conversationId ? 'active' : ''} ${runningChats[item.conversationId] ? 'running' : ''}`} key={item.conversationId}><button onClick={() => openConversation(item.conversationId)}><span>{item.title}</span></button><button onClick={() => deleteConversation(item.conversationId)} disabled={Boolean(runningChats[item.conversationId])} title={t('Delete chat', 'ลบแชท')}><Trash2 size={12} /></button></div>)}{conversations.length === 0 && <div className="sidebar-empty">{t('No chats yet', 'ยังไม่มีแชท')}</div>}</div></div>
         <div className="sidebar-footer">
           <div className={`weekly-limit ${weeklyUsage.status}`} aria-live="polite">
             <div className="weekly-limit-heading"><strong>{t('Weekly limit', 'ขีดจำกัดรายสัปดาห์')}</strong><span>{weeklyStatusLabel}</span></div>
@@ -1156,7 +1215,7 @@ function App() {
       </aside>
 
       <aside className="agent-panel">
-        <div className="agent-heading"><div><Bot size={17} /><span>Codex</span></div><div className="agent-actions"><button className="icon-action" disabled={running} onClick={newChat} title={t('New chat', 'แชทใหม่')}><Plus size={14} /></button><button className={`icon-action ${historyOpen ? 'active' : ''}`} onClick={() => { setHistoryOpen(value => !value); setActivityOpen(false) }} title={t('Chat history', 'ประวัติแชท')}><History size={14} /></button><button className="icon-action" disabled={events.length === 0} onClick={copyChat} title={t('Copy full chat', 'คัดลอกแชททั้งหมด')}><Copy size={14} /></button><button className="icon-action" disabled={running || undoStack.length === 0} onClick={undoLastTask} title={t('Undo latest task', 'ย้อนกลับงานล่าสุด')}><Undo2 size={14} /></button><button className={activityOpen ? 'active' : ''} onClick={() => { setActivityOpen(value => !value); setHistoryOpen(false) }} title="Left Ctrl + O"><ListTodo size={15} />{t('Activity', 'กิจกรรม')}{queue.length > 0 && <b>{queue.length}</b>}</button><button disabled={!running} onClick={stopCodex}><CircleStop size={15} />{t('Stop', 'หยุด')}</button></div></div>
+        <div className="agent-heading"><div><Bot size={17} /><span>Codex</span></div><div className="agent-actions"><button className="icon-action" onClick={newChat} title={t('New chat', 'แชทใหม่')}><Plus size={14} /></button><button className={`icon-action ${historyOpen ? 'active' : ''}`} onClick={() => { setHistoryOpen(value => !value); setActivityOpen(false) }} title={t('Chat history', 'ประวัติแชท')}><History size={14} /></button><button className="icon-action" disabled={events.length === 0} onClick={copyChat} title={t('Copy full chat', 'คัดลอกแชททั้งหมด')}><Copy size={14} /></button><button className="icon-action" disabled={running || undoStack.length === 0} onClick={undoLastTask} title={t('Undo latest task', 'ย้อนกลับงานล่าสุด')}><Undo2 size={14} /></button><button className={activityOpen ? 'active' : ''} onClick={() => { setActivityOpen(value => !value); setHistoryOpen(false) }} title="Left Ctrl + O"><ListTodo size={15} />{t('Activity', 'กิจกรรม')}{queue.length > 0 && <b>{queue.length}</b>}</button><button disabled={!running} onClick={stopCodex}><CircleStop size={15} />{t('Stop', 'หยุด')}</button></div></div>
         <div className="agent-meta"><span>Local workspace</span><span>{allowEdit ? 'Workspace write' : 'Read only'}</span></div>
         <div className="conversation">
           {events.length === 0 && <div className="welcome"><span className="welcome-kicker">CODEX WORKSPACE</span><div className="welcome-icon"><Bot size={22} /></div><h2>{t('What would you like to build?', 'วันนี้ต้องการสร้างอะไร')}</h2><p>{t('Ask Codex to create, inspect, or edit code. No folder is required.', 'สั่งให้ Codex สร้าง อ่าน ตรวจสอบ หรือแก้ไขงานได้โดยไม่ต้องเปิดโฟลเดอร์')}</p><div className="welcome-actions"><button onClick={() => setPrompt(t('Inspect this project and summarize improvements', 'ตรวจสอบโครงสร้างโปรเจกต์และสรุปสิ่งที่ควรปรับปรุง'))}><Search size={13} /><span>{t('Inspect project', 'ตรวจโปรเจกต์')}</span></button><button onClick={() => setPrompt(t('Find potential bugs and fix them safely', 'ค้นหาบัคที่อาจเกิดขึ้นและแก้ไขให้ปลอดภัย'))}><ShieldCheck size={13} /><span>{t('Find bugs', 'ค้นหาบัค')}</span></button><button onClick={() => setPrompt(t('Create a new project for me. Ask only for essential requirements.', 'สร้างโปรเจกต์ใหม่ให้ฉัน ถามเฉพาะข้อมูลที่จำเป็น'))}><Code2 size={13} /><span>{t('New project', 'สร้างโปรเจกต์')}</span></button></div></div>}
@@ -1166,8 +1225,8 @@ function App() {
         </div>
         {running && <div className="live-status"><div><i /><span>{liveActivity?.title || t('Starting task', 'กำลังเริ่มงาน')}</span></div>{(liveStats.additions > 0 || liveStats.deletions > 0) && <strong><b>+{liveStats.additions}</b><em>-{liveStats.deletions}</em></strong>}</div>}
         <AnimatePresence>{historyOpen && <motion.div className="activity-drawer history-drawer" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
-          <div className="activity-heading"><div><History size={15} /><span>{t('Chat history', 'ประวัติแชท')}</span></div><button className="new-chat-button" onClick={newChat} disabled={running}><Plus size={13} />{t('New chat', 'แชทใหม่')}</button></div>
-          <div className="history-list">{conversations.map(item => <div className={`history-item ${item.conversationId === conversationId ? 'active' : ''}`} key={item.conversationId}><button className="history-open" onClick={() => openConversation(item.conversationId)} disabled={running}><span>{item.title}</span><time>{new Date(item.updatedAt).toLocaleString(settings.language === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'short', timeStyle: 'short' })}</time></button><button className="history-delete" onClick={() => deleteConversation(item.conversationId)} disabled={running} title={t('Delete chat', 'ลบแชท')}><Trash2 size={13} /></button></div>)}</div>
+          <div className="activity-heading"><div><History size={15} /><span>{t('Chat history', 'ประวัติแชท')}</span></div><button className="new-chat-button" onClick={newChat}><Plus size={13} />{t('New chat', 'แชทใหม่')}</button></div>
+          <div className="history-list">{conversations.map(item => <div className={`history-item ${item.conversationId === conversationId ? 'active' : ''} ${runningChats[item.conversationId] ? 'running' : ''}`} key={item.conversationId}><button className="history-open" onClick={() => openConversation(item.conversationId)}><span className="history-chat-title"><i />{item.title}</span><time>{new Date(item.updatedAt).toLocaleString(settings.language === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'short', timeStyle: 'short' })}</time></button><button className="history-delete" onClick={() => deleteConversation(item.conversationId)} disabled={Boolean(runningChats[item.conversationId])} title={t('Delete chat', 'ลบแชท')}><Trash2 size={13} /></button></div>)}</div>
         </motion.div>}</AnimatePresence>
         <AnimatePresence>{activityOpen && <motion.div className="activity-drawer" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
           <div className="activity-heading"><div><ListTodo size={15} /><span>{t('Codex activity', 'กิจกรรมของ Codex')}</span></div><div className="activity-heading-actions"><kbd>Ctrl + O</kbd><button onClick={clearHistory} title={t('Clear chat', 'ล้างประวัติแชท')}><Trash2 size={13} /></button></div></div>
@@ -1202,7 +1261,7 @@ function App() {
       <motion.div className="mcp-modal" initial={{ opacity: 0, scale: .97, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .98 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
         <div className="mcp-heading"><div><span className="mcp-symbol"><Plug size={17} /></span><div><h2>{t('MCP plugins', 'ปลั๊กอิน MCP')}</h2><p>{t('Connect external tools to Codex', 'เชื่อมเครื่องมือภายนอกเข้ากับ Codex')}</p></div></div><div><button className="mcp-add" onClick={() => setMcpFormOpen(value => !value)}><Plus size={13} />{t('Add custom', 'เพิ่มเอง')}</button><button className="modal-close static" onClick={() => setMcpOpen(false)}><X size={16} /></button></div></div>
         <div className="mcp-content">
-          <section className="mcp-presets"><span className="mcp-section-label">{t('Quick install', 'ติดตั้งด่วน')}</span><div>{MCP_PRESETS.map(preset => { const installed = mcpServers.some(server => server.name === preset.name); return <button key={preset.name} disabled={installed || mcpBusy || running} onClick={() => installPreset(preset)}><span><Server size={15} /></span><div><strong>{preset.label}</strong><small>{settings.language === 'th' ? preset.description : preset.descriptionEn}</small></div><i>{installed ? t('Installed', 'ติดตั้งแล้ว') : t('Install', 'ติดตั้ง')}</i></button> })}</div></section>
+          <section className="mcp-presets"><span className="mcp-section-label">{t('Quick install', 'ติดตั้งด่วน')}</span><div>{MCP_PRESETS.map(preset => { const installed = mcpServers.some(server => server.name === preset.name); return <button key={preset.name} disabled={installed || mcpBusy || hasRunningChats} onClick={() => installPreset(preset)}><span><Server size={15} /></span><div><strong>{preset.label}</strong><small>{settings.language === 'th' ? preset.description : preset.descriptionEn}</small></div><i>{installed ? t('Installed', 'ติดตั้งแล้ว') : t('Install', 'ติดตั้ง')}</i></button> })}</div></section>
           <AnimatePresence>{mcpFormOpen && <motion.section className="mcp-form" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
             <div className="mcp-form-tabs"><button className={mcpForm.transport === 'http' ? 'active' : ''} onClick={() => setMcpForm(value => ({ ...value, transport: 'http' }))}><Globe2 size={12} />HTTP</button><button className={mcpForm.transport === 'stdio' ? 'active' : ''} onClick={() => setMcpForm(value => ({ ...value, transport: 'stdio' }))}><SquareTerminal size={12} />STDIO</button></div>
             <input value={mcpForm.name} onChange={event => setMcpForm(value => ({ ...value, name: event.target.value }))} placeholder={t('Plugin name', 'ชื่อปลั๊กอิน')} maxLength={40} />
@@ -1238,7 +1297,7 @@ function App() {
         <button className="modal-close" onClick={() => setAuthOpen(false)}><X size={16} /></button>
         <div className={`auth-symbol ${authState}`}><LogIn size={21} /></div>
         <h2>{authState === 'success' ? t('Signed in', 'เข้าสู่ระบบสำเร็จ') : authMode === 'browser' ? t('Sign in with ChatGPT', 'เข้าสู่ระบบด้วย ChatGPT') : t('Sign in with a device code', 'เข้าสู่ระบบด้วยรหัสยืนยัน')}</h2>
-        {authState === 'success' ? <><p>{t('Your ChatGPT account is ready to use with CodexDesk.', 'บัญชี ChatGPT พร้อมใช้งานกับ CodexDesk แล้ว')}</p><button className="auth-secondary logout-button" onClick={signOut} disabled={running}><LogOut size={14} />{t('Sign out', 'ออกจากระบบ')}</button></> : <>
+        {authState === 'success' ? <><p>{t('Your ChatGPT account is ready to use with CodexDesk.', 'บัญชี ChatGPT พร้อมใช้งานกับ CodexDesk แล้ว')}</p><button className="auth-secondary logout-button" onClick={signOut} disabled={hasRunningChats}><LogOut size={14} />{t('Sign out', 'ออกจากระบบ')}</button></> : <>
           <p>{authMode === 'browser' ? t('Sign in in your browser, then return to CodexDesk.', 'เข้าสู่ระบบในเบราว์เซอร์ แล้วกลับมาที่ CodexDesk') : t('Open the verification page and enter the one-time code.', 'เปิดหน้าตรวจสอบและกรอกรหัสแบบใช้ครั้งเดียว')}</p>
           {authMode === 'device' && deviceCode && <button className="device-code" onClick={() => navigator.clipboard.writeText(deviceCode)}><strong>{deviceCode}</strong><Copy size={14} /></button>}
           {authUrl && authState === 'working' && <button className="auth-primary" onClick={() => api.openExternal(authUrl)}><ExternalLink size={15} />{t('Open sign-in page', 'เปิดหน้าเข้าสู่ระบบ')}</button>}

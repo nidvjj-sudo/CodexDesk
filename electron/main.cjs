@@ -7,9 +7,13 @@ const path = require('path')
 
 let mainWindow
 let projectRoot
-let codexProcess
-let codexStopRequested = false
+const codexProcesses = new Map()
 let authProcess
+let usageProcess
+let usageStartPromise
+let usageStartResolve
+let usageMessageId = 1
+const usagePending = new Map()
 let projectWatcher
 let projectWatchTimer
 let historyMutation = Promise.resolve()
@@ -862,50 +866,98 @@ function normalizeWeeklyUsage(response = {}) {
   }
 }
 
-function readCodexWeeklyUsage() {
-  const runtime = codexRuntime()
-  return new Promise(resolve => {
-    const child = spawn(runtime.file, [...runtime.prefix, 'app-server', '--listen', 'stdio://'], {
-      cwd: app.getPath('home'),
-      windowsHide: true,
-      shell: false,
-      env: runtime.env,
-      stdio: ['pipe', 'pipe', 'pipe']
-    })
-    let settled = false
+function stopUsageServer() {
+  const child = usageProcess
+  usageProcess = null
+  usageStartPromise = null
+  usageStartResolve?.(false)
+  usageStartResolve = null
+  for (const pending of usagePending.values()) {
+    clearTimeout(pending.timeout)
+    pending.resolve({ status: 'unavailable' })
+  }
+  usagePending.clear()
+  stopProcess(child)
+}
+
+function startUsageServer() {
+  if (usageStartPromise) return usageStartPromise
+  if (usageProcess?.stdin?.writable) return Promise.resolve(true)
+  let runtime
+  try {
+    runtime = codexRuntime()
+  } catch {
+    return Promise.resolve(false)
+  }
+  usageStartPromise = new Promise(resolve => {
+    usageStartResolve = resolve
     let buffer = ''
-    let timeout = null
-    const finish = value => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
+    let initialized = false
+    let startupTimer
+    const child = spawn(runtime.file, [...runtime.prefix, 'app-server', '--listen', 'stdio://'], {
+      cwd: app.getPath('home'), windowsHide: true, shell: false, env: runtime.env, stdio: ['pipe', 'pipe', 'pipe']
+    })
+    usageProcess = child
+    const fail = () => {
+      if (usageProcess !== child) return
+      clearTimeout(startupTimer)
+      usageProcess = null
+      usageStartPromise = null
+      usageStartResolve = null
+      for (const pending of usagePending.values()) {
+        clearTimeout(pending.timeout)
+        pending.resolve({ status: 'unavailable' })
+      }
+      usagePending.clear()
+      if (!initialized) resolve(false)
       stopProcess(child)
-      resolve(value)
     }
-    const send = value => {
-      if (!settled && child.stdin.writable) child.stdin.write(`${JSON.stringify(value)}\n`)
-    }
-    timeout = setTimeout(() => finish({ status: 'unavailable' }), 12000)
+    startupTimer = setTimeout(fail, 12000)
     child.stderr.resume()
     child.stdout.on('data', chunk => {
       buffer += chunk.toString('utf8')
-      if (buffer.length > 1024 * 1024) return finish({ status: 'unavailable' })
+      if (buffer.length > 1024 * 1024) return fail()
       const lines = buffer.split(/\r?\n/)
       buffer = lines.pop() || ''
       for (const line of lines) {
         if (!line.trim()) continue
         try {
           const message = JSON.parse(line)
-          if (message.id === 1 && message.result) send({ id: 2, method: 'account/rateLimits/read', params: null })
-          if (message.id === 1 && message.error) finish({ status: 'unavailable' })
-          if (message.id === 2 && message.result) finish(normalizeWeeklyUsage(message.result))
-          if (message.id === 2 && message.error) finish({ status: /authentication required/i.test(message.error.message || '') ? 'signed-out' : 'unavailable' })
+          if (message.id === 1) {
+            if (message.error) return fail()
+            initialized = true
+            clearTimeout(startupTimer)
+            usageStartPromise = null
+            usageStartResolve = null
+            resolve(true)
+            continue
+          }
+          const pending = usagePending.get(message.id)
+          if (!pending) continue
+          clearTimeout(pending.timeout)
+          usagePending.delete(message.id)
+          if (message.result) pending.resolve(normalizeWeeklyUsage(message.result))
+          else pending.resolve({ status: /authentication required/i.test(message.error?.message || '') ? 'signed-out' : 'unavailable' })
         } catch {}
       }
     })
-    child.on('error', () => finish({ status: 'unavailable' }))
-    child.on('close', () => finish({ status: 'unavailable' }))
-    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'CodexDesk', version: app.getVersion() } } })
+    child.on('error', fail)
+    child.on('close', fail)
+    child.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { clientInfo: { name: 'CodexDesk', version: app.getVersion() } } })}\n`)
+  })
+  return usageStartPromise
+}
+
+async function readCodexWeeklyUsage() {
+  if (!await startUsageServer() || !usageProcess?.stdin?.writable) return { status: 'unavailable' }
+  return new Promise(resolve => {
+    const id = ++usageMessageId
+    const timeout = setTimeout(() => {
+      usagePending.delete(id)
+      resolve({ status: 'unavailable' })
+    }, 10000)
+    usagePending.set(id, { resolve, timeout })
+    usageProcess.stdin.write(`${JSON.stringify({ id, method: 'account/rateLimits/read', params: null })}\n`)
   })
 }
 
@@ -988,7 +1040,7 @@ ipcMain.handle('app:version', () => app.getVersion())
 ipcMain.handle('settings:get', () => readAppSettings())
 ipcMain.handle('settings:save', (_, input) => saveAppSettings(input))
 ipcMain.handle('settings:clear-local-data', async () => {
-  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
+  if (codexProcesses.size) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   await Promise.all([
     fs.rm(path.join(app.getPath('userData'), 'chat-history'), { recursive: true, force: true }),
     fs.rm(path.join(app.getPath('userData'), 'undo-history'), { recursive: true, force: true })
@@ -1040,6 +1092,19 @@ ipcMain.handle('history:save', (_, payload) => mutateHistory(async () => {
   store.activeId = conversation.conversationId
   await writeHistoryStore(store)
   return conversation
+}))
+ipcMain.handle('history:append', (_, payload = {}) => mutateHistory(async () => {
+  const store = await readHistoryStore()
+  const conversation = store.conversations.find(item => item.conversationId === payload.conversationId)
+  if (!conversation) return false
+  const additions = normalizeConversation({ events: payload.events }).events
+  conversation.events = [...conversation.events, ...additions].slice(-300)
+  if (typeof payload.sessionId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(payload.sessionId)) conversation.sessionId = payload.sessionId
+  conversation.updatedAt = new Date().toISOString()
+  const firstMessage = conversation.events.find(event => event.kind === 'user')?.text.trim()
+  if (firstMessage && ['New chat', 'แชทใหม่'].includes(conversation.title)) conversation.title = firstMessage.slice(0, 60)
+  await writeHistoryStore(store)
+  return true
 }))
 ipcMain.handle('history:list', async () => {
   const store = await readHistoryStore()
@@ -1116,20 +1181,22 @@ ipcMain.handle('auth:start', async (_, mode = 'browser') => {
   })
   currentProcess.on('close', code => {
     if (authProcess !== currentProcess) return
+    if (code === 0) stopUsageServer()
     send(code === 0 ? 'success' : 'error', String(code ?? -1))
     authProcess = null
   })
   return true
 })
 ipcMain.handle('auth:logout', async () => {
-  if (codexProcess && !codexProcess.killed) throw new Error(uiText('Stop Codex before signing out.', 'กรุณาหยุดงาน Codex ก่อนออกจากระบบ'))
+  if (codexProcesses.size) throw new Error(uiText('Stop Codex before signing out.', 'กรุณาหยุดงาน Codex ก่อนออกจากระบบ'))
+  stopUsageServer()
   const result = await runCodex(['logout'], app.getPath('home'))
   if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
   return true
 })
 ipcMain.handle('mcp:list', () => listMcpServers())
 ipcMain.handle('mcp:add', async (_, payload = {}) => {
-  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
+  if (codexProcesses.size) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   const name = validateMcpName(payload.name)
   const args = ['mcp', 'add', name]
   if (payload.transport === 'http') {
@@ -1167,18 +1234,18 @@ ipcMain.handle('mcp:add', async (_, payload = {}) => {
   return listMcpServers()
 })
 ipcMain.handle('mcp:remove', async (_, input) => {
-  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
+  if (codexProcesses.size) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   const result = await runCodex(['mcp', 'remove', validateMcpName(input)], app.getPath('home'))
   if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
   return listMcpServers()
 })
 ipcMain.handle('mcp:toggle', async (_, payload) => {
-  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
+  if (codexProcesses.size) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   await setMcpSetting(payload?.name, 'enabled', String(Boolean(payload?.enabled)))
   return listMcpServers()
 })
 ipcMain.handle('mcp:login', async (_, input) => {
-  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
+  if (codexProcesses.size) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   const name = validateMcpName(input)
   const opened = new Set()
   const onOutput = data => {
@@ -1200,7 +1267,7 @@ ipcMain.handle('mcp:login', async (_, input) => {
   return listMcpServers()
 })
 ipcMain.handle('mcp:logout', async (_, input) => {
-  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
+  if (codexProcesses.size) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   const result = await runCodex(['mcp', 'logout', validateMcpName(input)], app.getPath('home'))
   if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
   return listMcpServers()
@@ -1228,11 +1295,12 @@ ipcMain.handle('update:download', () => downloadUpdatePackage())
 ipcMain.handle('update:install', () => installDownloadedUpdate())
 ipcMain.handle('codex:run', async (_, options) => {
   if (!projectRoot) throw new Error(uiText('No project is open.', 'ยังไม่ได้เปิดโปรเจกต์'))
-  if (codexProcess && !codexProcess.killed) throw new Error(uiText('Codex is already working.', 'Codex กำลังทำงานอยู่'))
+  const conversationId = typeof options.conversationId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(options.conversationId) ? options.conversationId : null
+  if (!conversationId) throw new Error(uiText('Invalid chat.', 'แชทไม่ถูกต้อง'))
+  if (codexProcesses.has(conversationId)) throw new Error(uiText('This chat is already working.', 'แชทนี้กำลังทำงานอยู่'))
   const runtime = codexRuntime()
   const settings = await readAppSettings()
   const attachments = await validateTaskAttachments(options.attachments)
-  codexStopRequested = false
   const accessArgs = options.allowEdit
     ? ['--sandbox', 'danger-full-access', '--ask-for-approval', 'never']
     : ['--sandbox', 'read-only', '--ask-for-approval', 'never']
@@ -1266,43 +1334,48 @@ ipcMain.handle('codex:run', async (_, options) => {
   const args = [...runtime.prefix, ...accessArgs, ...execArgs]
   discordOutputBuffer = ''
   updateDiscordActivity('thinking')
-  codexProcess = spawn(runtime.file, args, { cwd: projectRoot, windowsHide: true, shell: false, env: runtime.env, stdio: ['ignore', 'pipe', 'pipe'] })
-  const send = (type, data) => mainWindow?.webContents.send('codex:event', { type, data })
+  const child = spawn(runtime.file, args, { cwd: projectRoot, windowsHide: true, shell: false, env: runtime.env, stdio: ['ignore', 'pipe', 'pipe'] })
+  const task = { child, stopRequested: false }
+  codexProcesses.set(conversationId, task)
+  const send = (type, data) => mainWindow?.webContents.send('codex:event', { type, data, conversationId })
   const cleanOutput = chunk => cleanProcessText(chunk).replace(/Reading additional input from stdin\.\.\.\r?\n?/g, '')
   let diagnostics = ''
-  codexProcess.stdout.on('data', chunk => {
+  child.stdout.on('data', chunk => {
     const text = cleanOutput(chunk)
     if (text) {
       updateDiscordFromCodexOutput(text)
       send('stdout', text)
     }
   })
-  codexProcess.stderr.on('data', chunk => {
+  child.stderr.on('data', chunk => {
     diagnostics = (diagnostics + cleanOutput(chunk)).slice(-12000)
   })
   return new Promise(resolve => {
-    codexProcess.on('error', error => {
-      send('error', error.message)
-      codexProcess = null
-      updateDiscordActivity('ready')
-      resolve({ code: -1 })
-    })
-    codexProcess.on('close', code => {
-      if (code !== 0 && !codexStopRequested) send('error', explainCodexFailure(diagnostics))
+    let settled = false
+    const finish = code => {
+      if (settled) return
+      settled = true
+      if (code !== 0 && !task.stopRequested) send('error', explainCodexFailure(diagnostics))
       send('done', String(code ?? -1))
       if (code === 0 && settings.notifications && Notification.isSupported() && !mainWindow?.isFocused()) {
         new Notification({ title: 'CodexDesk', body: uiText('Codex finished the task.', 'Codex ทำงานเสร็จแล้ว') }).show()
       }
-      codexProcess = null
-      codexStopRequested = false
-      updateDiscordActivity('ready')
+      if (codexProcesses.get(conversationId) === task) codexProcesses.delete(conversationId)
+      if (!codexProcesses.size) updateDiscordActivity('ready')
       resolve({ code })
+    }
+    child.on('error', error => {
+      diagnostics = error.message
+      finish(-1)
     })
+    child.on('close', finish)
   })
 })
-ipcMain.handle('codex:stop', () => {
-  codexStopRequested = true
-  return stopProcess(codexProcess)
+ipcMain.handle('codex:stop', (_, conversationId) => {
+  const task = codexProcesses.get(String(conversationId || ''))
+  if (!task) return false
+  task.stopRequested = true
+  return stopProcess(task.child)
 })
 
 if (!app.requestSingleInstanceLock()) {
@@ -1326,8 +1399,10 @@ app.on('before-quit', () => {
   isQuitting = true
   updateDownloadController?.abort()
   stopProjectWatcher()
-  stopProcess(codexProcess)
+  for (const task of codexProcesses.values()) stopProcess(task.child)
+  codexProcesses.clear()
   stopProcess(authProcess)
+  stopUsageServer()
   void stopDiscordPresence()
   tray?.destroy()
   tray = undefined

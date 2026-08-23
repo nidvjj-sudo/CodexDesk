@@ -230,6 +230,9 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .history-open { min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 11px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .history-open:disabled, .history-delete:disabled { cursor: default; }
 .history-open span { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.history-chat-title { display: flex; align-items: center; gap: 7px; }
+.history-chat-title i { display: none; width: 10px; height: 10px; flex: 0 0 auto; border: 1.5px solid #55555b; border-top-color: #eeeeef; border-radius: 50%; }
+.history-item.running .history-chat-title i { display: block; animation: spin .7s linear infinite; }
 .history-open time { color: #66666c; font: 8px "Cascadia Mono", Consolas, monospace; }
 .history-delete { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #696970; opacity: 0; cursor: pointer; transition: opacity .15s, background .15s, color .15s; }
 .history-item:hover .history-delete, .history-item:focus-within .history-delete { opacity: 1; }
@@ -523,7 +526,9 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .sidebar-history-item:hover { background: #151517; }
 .sidebar-history-item.active { background: #1d1d1f; color: #f1f1f2; }
 .sidebar-history-item > button { min-width: 0; height: 36px; padding: 0 9px; border: 0; background: transparent; color: #b1b1b6; text-align: left; cursor: pointer; }
-.sidebar-history-item > button:first-child span { display: block; overflow: hidden; font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-history-item > button:first-child { display: flex; align-items: center; gap: 8px; }
+.sidebar-history-item > button:first-child span { display: block; min-width: 0; overflow: hidden; font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-history-item.running > button:first-child::before { width: 10px; height: 10px; flex: 0 0 auto; border: 1.5px solid #55555b; border-top-color: #eeeeef; border-radius: 50%; animation: spin .7s linear infinite; content: ''; }
 .sidebar-history-item > button:last-child { width: 25px; height: 25px; display: grid; place-items: center; padding: 0; border-radius: 6px; color: #67676d; opacity: 0; }
 .sidebar-history-item:hover > button:last-child, .sidebar-history-item:focus-within > button:last-child { opacity: 1; }
 .sidebar-history-item > button:last-child:hover { background: #29292d; color: #e2e2e4; }
@@ -594,12 +599,14 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 }
 
 .composer { width: min(780px, calc(100% - 28px)); margin: 0 auto 14px; border-radius: 16px; }
+.live-status { width: min(780px, calc(100% - 28px)); margin: 0 auto 8px; }
 .composer textarea { height: 52px; min-height: 52px; max-height: 72px; padding: 10px 12px 6px; line-height: 1.45; }
 .composer-footer { min-height: 35px; padding-bottom: 7px; }
 .app-shell.density-compact .composer textarea { height: 46px; min-height: 46px; }
 
 @media (max-width: 680px) {
-  .composer { width: calc(100% - 18px); margin-bottom: 9px; }
+  .composer, .live-status { width: calc(100% - 18px); }
+  .composer { margin-bottom: 9px; }
 }
 
 .notice-stack { position: fixed; z-index: 90; top: 64px; right: 16px; width: min(340px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
