@@ -113,6 +113,29 @@ function App() {
   useEffect(() => api.getProject().then(value => value && loadProject(value)), [])
 
   useEffect(() => {
+    if (!project) return undefined
+    let refreshing = false
+    let pending = false
+    const update = async () => {
+      if (refreshing) {
+        pending = true
+        return
+      }
+      refreshing = true
+      try {
+        setFiles(await api.listFiles())
+      } finally {
+        refreshing = false
+        if (pending) {
+          pending = false
+          void update()
+        }
+      }
+    }
+    return api.onFilesChanged(update)
+  }, [project?.path])
+
+  useEffect(() => {
     api.authStatus().then(value => {
       setAuthenticated(value.authenticated)
       if (!value.authenticated) startLogin()

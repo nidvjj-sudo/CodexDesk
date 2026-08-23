@@ -1,6 +1,6 @@
 {
   "name": "codexdesk",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "private": true,
   "description": "Desktop workspace for OpenAI Codex CLI",
   "repository": { "type": "git", "url": "https://github.com/nidvjj-sudo/CodexDesk.git" },

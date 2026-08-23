@@ -1,7 +1,7 @@
 const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require('electron')
 const { spawn } = require('child_process')
 const { createHash } = require('crypto')
-const { existsSync, mkdirSync } = require('fs')
+const { existsSync, mkdirSync, watch } = require('fs')
 const fs = require('fs/promises')
 const path = require('path')
 const { autoUpdater } = require('electron-updater')
@@ -11,9 +11,37 @@ let projectRoot
 let codexProcess
 let codexStopRequested = false
 let authProcess
+let projectWatcher
+let projectWatchTimer
 let updateState = { status: 'idle', version: null, percent: 0 }
 
 const ignored = new Set(['.git', '.idea', '.vs', 'node_modules', 'bin', 'obj', 'dist', 'release', 'build', 'venv', '.venv', '__pycache__'])
+
+function stopProjectWatcher() {
+  clearTimeout(projectWatchTimer)
+  projectWatchTimer = null
+  projectWatcher?.close()
+  projectWatcher = null
+}
+
+function startProjectWatcher() {
+  stopProjectWatcher()
+  if (!projectRoot) return
+  try {
+    projectWatcher = watch(projectRoot, { recursive: true }, (_, filename) => {
+      const relative = String(filename || '')
+      const topLevel = relative.split(/[\\/]/)[0]
+      if (ignored.has(topLevel)) return
+      clearTimeout(projectWatchTimer)
+      projectWatchTimer = setTimeout(() => {
+        mainWindow?.webContents.send('files:changed')
+      }, 180)
+    })
+    projectWatcher.on('error', stopProjectWatcher)
+  } catch {
+    stopProjectWatcher()
+  }
+}
 
 function cleanProcessText(value) {
   return value
@@ -274,6 +302,7 @@ ipcMain.handle('project:open', async () => {
   const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] })
   if (result.canceled) return null
   projectRoot = path.resolve(result.filePaths[0])
+  startProjectWatcher()
   return { path: projectRoot, name: path.basename(projectRoot) }
 })
 
@@ -457,6 +486,7 @@ app.whenReady().then(() => {
   setupAutoUpdater()
 })
 app.on('before-quit', () => {
+  stopProjectWatcher()
   stopProcess(codexProcess)
   stopProcess(authProcess)
 })

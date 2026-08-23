@@ -30,6 +30,11 @@ contextBridge.exposeInMainWorld('codexDesk', {
     ipcRenderer.on('codex:event', handler)
     return () => ipcRenderer.removeListener('codex:event', handler)
   },
+  onFilesChanged: callback => {
+    const handler = () => callback()
+    ipcRenderer.on('files:changed', handler)
+    return () => ipcRenderer.removeListener('files:changed', handler)
+  },
   onAuthEvent: callback => {
     const handler = (_, data) => callback(data)
     ipcRenderer.on('auth:event', handler)
