@@ -18,8 +18,10 @@ jobs:
         with:
           node-version: "22"
       - run: npm install
-      - name: Ensure release tag
+      - name: Prepare release
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $version = node -p "require('./package.json').version"
           $tag = "v$version"
@@ -28,6 +30,9 @@ jobs:
           if (-not (git ls-remote --tags origin "refs/tags/$tag")) {
             git tag $tag
             git push origin $tag
+          }
+          if (-not (gh release view $tag 2>$null)) {
+            gh release create $tag --title $version --notes "CodexDesk $version"
           }
       - run: npm run release
         env:
