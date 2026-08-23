@@ -3,7 +3,7 @@ import Editor from '@monaco-editor/react'
 import { motion, AnimatePresence } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Bot, Brain, Check, ChevronDown, ChevronRight, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, Globe2, History, Info, ListTodo, LockKeyhole, LogIn, LogOut, Monitor, Palette, Plug, Plus, Power, RefreshCw, Save, Search, Send, Server, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal, SquareTerminal, Trash2, Undo2, UserRound, X } from 'lucide-react'
+import { Bot, Brain, Check, ChevronDown, ChevronRight, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, Globe2, History, Image as ImageIcon, Info, ListTodo, LockKeyhole, LogIn, LogOut, Monitor, Palette, Paperclip, Plug, Plus, Power, RefreshCw, Save, Search, Send, Server, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal, SquareTerminal, Trash2, Undo2, UserRound, Video, X } from 'lucide-react'
 
 const api = window.codexDesk
 const CHAT_COMMANDS = [
@@ -31,9 +31,9 @@ const CHAT_COMMANDS = [
 ]
 
 const MCP_PRESETS = [
-  { name: 'github', label: 'GitHub', description: 'Repository, Issue และ Pull Request', url: 'https://api.githubcopilot.com/mcp/' },
-  { name: 'canva', label: 'Canva', description: 'ค้นหาและจัดการงานออกแบบ', url: 'https://mcp.canva.com/mcp' },
-  { name: 'google_drive', label: 'Google Drive', description: 'ค้นหา อ่าน และจัดการไฟล์', url: 'https://drivemcp.googleapis.com/mcp/v1' }
+  { name: 'github', label: 'GitHub', description: 'Repository, Issue และ Pull Request', descriptionEn: 'Repositories, issues, and pull requests', url: 'https://api.githubcopilot.com/mcp/' },
+  { name: 'canva', label: 'Canva', description: 'ค้นหาและจัดการงานออกแบบ', descriptionEn: 'Search and manage designs', url: 'https://mcp.canva.com/mcp' },
+  { name: 'google_drive', label: 'Google Drive', description: 'ค้นหา อ่าน และจัดการไฟล์', descriptionEn: 'Search, read, and manage files', url: 'https://drivemcp.googleapis.com/mcp/v1' }
 ]
 
 function getMcpAuthState(status, http) {
@@ -60,7 +60,8 @@ const DEFAULT_SETTINGS = {
   preventSleep: true, notifications: true, defaultAllowEdit: true, defaultApproval: 'ask',
   model: '', reasoningEffort: 'medium', personality: 'pragmatic', webSearch: 'cached',
   customInstructions: '', memoriesEnabled: false, useMemories: true,
-  generateMemories: true, disableMemoriesOnExternal: true
+  generateMemories: true, disableMemoriesOnExternal: true,
+  discordPresence: false, discordClientId: '', discordShowProject: true
 }
 
 function Toggle({ checked, onChange, disabled = false }) {
@@ -91,7 +92,7 @@ function SettingsModal({ authenticated, currentVersion, draft, onChange, onClear
         {section === 'personal' && <><div className="settings-title"><Palette size={18} /><div><h3>Personalization</h3><p>{l('Choose how Codex responds and remembers context', 'กำหนดวิธีที่ Codex ตอบและจดจำบริบท')}</p></div></div>{select('personality', l('Response style', 'บุคลิกการตอบ'), draft.personality, [{ value: 'pragmatic', label: l('Pragmatic and concise', 'กระชับและตรงประเด็น') }, { value: 'friendly', label: l('Friendly and explanatory', 'เป็นมิตรและอธิบายมากขึ้น') }, { value: 'none', label: l('No personality', 'ไม่กำหนดบุคลิก') }])}<label className="settings-field full"><span>{l('Custom instructions', 'คำแนะนำส่วนตัว')}</span><textarea value={draft.customInstructions} onChange={event => set('customInstructions', event.target.value)} maxLength={12000} placeholder={l('For example: use clean code and verify changes before editing', 'เช่น ตอบเป็นภาษาไทย เขียนโค้ดให้อ่านง่าย และตรวจสอบก่อนแก้ไข')} /><small>{draft.customInstructions.length.toLocaleString()} / 12,000 {l('characters', 'ตัวอักษร')}</small></label><div className="settings-subheading"><Brain size={14} />{l('Codex memories', 'ความทรงจำของ Codex')}</div>{row(l('Enable memories', 'เปิดใช้ความทรงจำ'), l('Use the Codex CLI memory system', 'ให้ Codex ใช้ระบบ memories ของ CLI'), 'memoriesEnabled')}{row(l('Use saved memories', 'ใช้ความทรงจำที่มีอยู่'), l('Apply remembered context to future tasks', 'นำสิ่งที่จำไว้มาใช้กับงานใหม่'), 'useMemories', !draft.memoriesEnabled)}{row(l('Generate new memories', 'สร้างความทรงจำใหม่'), l('Learn reusable guidance for future tasks', 'เรียนรู้คำแนะนำที่เป็นประโยชน์สำหรับงานถัดไป'), 'generateMemories', !draft.memoriesEnabled)}{row(l('Disable with external context', 'ปิดเมื่อมีบริบทภายนอก'), l('Reduce context mixing when external tools are connected', 'ลดการผสมข้อมูลเมื่อเชื่อมเครื่องมือภายนอก'), 'disableMemoriesOnExternal', !draft.memoriesEnabled)}</>}
         {section === 'model' && <><div className="settings-title"><Brain size={18} /><div><h3>{l('Model & web search', 'โมเดลและการค้นเว็บ')}</h3><p>{l('Defaults used by Codex CLI for new tasks', 'ค่าหลักที่ Codex CLI ใช้กับทุกแชทใหม่')}</p></div></div>{select('model', l('Model', 'โมเดล'), draft.model, [{ value: '', label: l('Account default', 'ค่าเริ่มต้นของบัญชี') }, { value: 'gpt-5.6-sol', label: l('GPT-5.6 Sol — most capable', 'GPT-5.6 Sol — ฉลาดที่สุด') }, { value: 'gpt-5.6-terra', label: l('GPT-5.6 Terra — balanced', 'GPT-5.6 Terra — สมดุล') }, { value: 'gpt-5.6-luna', label: l('GPT-5.6 Luna — fast and efficient', 'GPT-5.6 Luna — เร็วและประหยัด') }, { value: 'gpt-5.5', label: l('GPT-5.5 — previous generation', 'GPT-5.5 — รุ่นก่อนหน้า') }])}<div className="settings-subheading"><Brain size={14} />{l('Reasoning effort', 'ระดับการคิด')}</div><div className="reasoning-picker">{[{ value: 'low', label: 'Low', detail: l('Fast, lower usage', 'เร็วและใช้น้อย') }, { value: 'medium', label: 'Medium', detail: l('Balanced, recommended', 'สมดุล แนะนำ') }, { value: 'high', label: 'High', detail: l('More thorough', 'คิดละเอียดขึ้น') }, { value: 'xhigh', label: 'Extra high', detail: l('Most complex tasks', 'งานซับซ้อนที่สุด') }].map(option => <button key={option.value} className={draft.reasoningEffort === option.value ? 'active' : ''} onClick={() => set('reasoningEffort', option.value)}><strong>{option.label}</strong><small>{option.detail}</small></button>)}</div><p className="usage-hint">{l('Higher levels usually take longer and use more quota. Actual usage depends on the model, task, and ChatGPT plan.', 'ระดับที่สูงขึ้นมักใช้เวลานานและใช้โควตามากขึ้น จำนวนจริงขึ้นอยู่กับโมเดล งาน และแผน ChatGPT ของคุณ')}</p>{select('webSearch', l('Web search', 'การค้นเว็บ'), draft.webSearch, [{ value: 'cached', label: l('Cached — safer default', 'Cached ปลอดภัยกว่า') }, { value: 'live', label: l('Live — latest information', 'Live ข้อมูลล่าสุด') }, { value: 'disabled', label: l('Disabled', 'ปิด') }])}<div className="settings-callout"><Globe2 size={15} /><div><strong>{l('Codex can search the web', 'Codex ค้นเว็บได้จริง')}</strong><p>{l('Cached uses OpenAI’s search index. Live fetches current pages. Web content can be untrusted, so verify sources.', 'Cached ใช้ดัชนีของ OpenAI ส่วน Live เปิดหน้าเว็บล่าสุด การค้นเว็บอาจพบเนื้อหาที่ไม่น่าเชื่อถือ ควรตรวจแหล่งอ้างอิงเสมอ')}</p></div></div></>}
         {section === 'permissions' && <><div className="settings-title"><LockKeyhole size={18} /><div><h3>{l('Default permissions', 'สิทธิ์เริ่มต้น')}</h3><p>{l('Applied the next time the app starts', 'ใช้เมื่อเริ่มแอปครั้งถัดไป')}</p></div></div>{row(l('Allow file edits', 'อนุญาตแก้ไขไฟล์'), l('Codex can read, create, edit, and run tools in the project', 'Codex อ่าน สร้าง แก้ไข และรันเครื่องมือในโปรเจกต์ได้'), 'defaultAllowEdit')}<div className="settings-grid">{select('defaultApproval', l('Confirmation before tasks', 'การยืนยันก่อนเริ่มงาน'), draft.defaultApproval, [{ value: 'ask', label: l('Ask every time', 'ถามทุกครั้ง') }, { value: 'auto', label: l('Automatic', 'ทำอัตโนมัติ') }])}</div><div className="settings-callout"><ShieldCheck size={15} /><div><strong>{l('Permissions apply to local work', 'สิทธิ์มีผลกับงานในเครื่อง')}</strong><p>{l('Ask mode confirms before file-changing tasks. Risky commands remain subject to Codex and operating-system policy.', 'โหมดถามก่อนจะขออนุญาตก่อนเริ่มงานที่แก้ไฟล์ ส่วนคำสั่งเสี่ยงยังขึ้นอยู่กับนโยบายของ Codex และระบบปฏิบัติการ')}</p></div></div></>}
-        {section === 'integrations' && <><div className="settings-title"><Plug size={18} /><div><h3>{l('Integrations', 'การเชื่อมต่อ')}</h3><p>{l('ChatGPT account and MCP tools', 'บัญชี ChatGPT และเครื่องมือ MCP')}</p></div></div><div className="settings-account"><span className={authenticated ? 'ready' : ''}>{authenticated ? <Check size={16} /> : <LogIn size={16} />}</span><div><strong>{authenticated ? l('ChatGPT connected', 'เชื่อมต่อ ChatGPT แล้ว') : l('ChatGPT not connected', 'ยังไม่ได้เชื่อมต่อ ChatGPT')}</strong><small>{l('Codex CLI uses this account to process tasks', 'Codex CLI ใช้บัญชีนี้เพื่อประมวลผลงาน')}</small></div>{authenticated && <button onClick={onSignOut}>{l('Sign out', 'ออกจากระบบ')}</button>}</div><button className="settings-wide-action" onClick={onOpenMcp}><Plug size={14} /><div><strong>{l('Manage MCP plugins', 'จัดการปลั๊กอิน MCP')}</strong><small>{l('GitHub, Canva, Google Drive, and your own servers', 'GitHub, Canva, Google Drive และเซิร์ฟเวอร์ของคุณ')}</small></div><ChevronRight size={15} /></button></>}
+        {section === 'integrations' && <><div className="settings-title"><Plug size={18} /><div><h3>{l('Integrations', 'การเชื่อมต่อ')}</h3><p>{l('ChatGPT account, MCP tools, and Discord', 'บัญชี ChatGPT เครื่องมือ MCP และ Discord')}</p></div></div><div className="settings-account"><span className={authenticated ? 'ready' : ''}>{authenticated ? <Check size={16} /> : <LogIn size={16} />}</span><div><strong>{authenticated ? l('ChatGPT connected', 'เชื่อมต่อ ChatGPT แล้ว') : l('ChatGPT not connected', 'ยังไม่ได้เชื่อมต่อ ChatGPT')}</strong><small>{l('Codex CLI uses this account to process tasks', 'Codex CLI ใช้บัญชีนี้เพื่อประมวลผลงาน')}</small></div>{authenticated && <button onClick={onSignOut}>{l('Sign out', 'ออกจากระบบ')}</button>}</div><button className="settings-wide-action" onClick={onOpenMcp}><Plug size={14} /><div><strong>{l('Manage MCP plugins', 'จัดการปลั๊กอิน MCP')}</strong><small>{l('GitHub, Canva, Google Drive, and your own servers', 'GitHub, Canva, Google Drive และเซิร์ฟเวอร์ของคุณ')}</small></div><ChevronRight size={15} /></button><div className="settings-subheading"><Bot size={14} />Discord Rich Presence</div>{row(l('Show CodexDesk in Discord', 'แสดง CodexDesk ใน Discord'), l('Discord Desktop must be running', 'ต้องเปิดโปรแกรม Discord Desktop'), 'discordPresence')}<label className="settings-field full"><span>{l('Discord Application ID', 'Discord Application ID')}</span><input value={draft.discordClientId} onChange={event => set('discordClientId', event.target.value.replace(/\D/g, '').slice(0, 24))} disabled={!draft.discordPresence} placeholder="123456789012345678" /><small>{l('Create an application in the Discord Developer Portal and copy its Application ID.', 'สร้างแอปใน Discord Developer Portal แล้วคัดลอก Application ID')}</small></label>{row(l('Show project name', 'แสดงชื่อโปรเจกต์'), l('Displays “In project-name” in your Discord activity', 'แสดง “ใน ชื่อโปรเจกต์” บนสถานะ Discord'), 'discordShowProject', !draft.discordPresence)}</>}
         {section === 'privacy' && <><div className="settings-title"><ShieldCheck size={18} /><div><h3>{l('Data & privacy', 'ข้อมูลและความเป็นส่วนตัว')}</h3><p>{l('Understand how your data is stored and used', 'ดูว่าข้อมูลถูกเก็บและใช้งานอย่างไร')}</p></div></div><div className="privacy-card"><strong>{l('Data in CodexDesk', 'ข้อมูลใน CodexDesk')}</strong><p>{l('Chat history and undo snapshots are stored on this device. Prompts and context used by Codex are sent to OpenAI through Codex CLI under your account type and workspace policy.', 'ประวัติแชทและจุดย้อนกลับเก็บไว้ในเครื่องนี้ ส่วนข้อความและบริบทที่ Codex ใช้จะถูกส่งผ่าน Codex CLI ไปยัง OpenAI ตามประเภทบัญชีและนโยบายของพื้นที่ทำงาน')}</p></div><button className="settings-wide-action" onClick={() => api.openLink('https://openai.com/policies/privacy-policy/')}><ExternalLink size={14} /><div><strong>{l('OpenAI Privacy Policy', 'นโยบายความเป็นส่วนตัวของ OpenAI')}</strong><small>{l('Read the official privacy policy', 'อ่าน Privacy Policy ฉบับทางการ')}</small></div><ChevronRight size={15} /></button><button className="settings-wide-action" onClick={() => api.openLink('https://learn.chatgpt.com/api/docs/guides/your-data')}><ExternalLink size={14} /><div><strong>{l('Data controls', 'ข้อมูลและการควบคุมข้อมูล')}</strong><small>{l('Learn how ChatGPT and API data is managed', 'อ่านวิธีจัดการข้อมูลของ ChatGPT และ API')}</small></div><ChevronRight size={15} /></button><button className="settings-wide-action" onClick={() => api.openLink('https://learn.chatgpt.com/docs/auth')}><ExternalLink size={14} /><div><strong>{l('Codex authentication', 'การเข้าสู่ระบบ Codex')}</strong><small>{l('Sign-in method affects data policy', 'ประเภทการเข้าสู่ระบบมีผลต่อนโยบายข้อมูล')}</small></div><ChevronRight size={15} /></button><button className="danger-action" onClick={onClearData}><Trash2 size={14} />{l('Delete all local chat and undo history', 'ลบประวัติแชทและจุดย้อนกลับทั้งหมดในเครื่อง')}</button></>}
         {section === 'about' && <><div className="settings-title"><Info size={18} /><div><h3>{l('About CodexDesk', 'เกี่ยวกับ CodexDesk')}</h3><p>{l('Desktop workspace for OpenAI Codex CLI on Windows', 'เดสก์ท็อปสำหรับ OpenAI Codex CLI บน Windows')}</p></div></div><div className="about-mark"><Code2 size={22} /><div><strong>CodexDesk</strong><small>{l('Version', 'เวอร์ชัน')} {currentVersion || l('Checking', 'กำลังตรวจสอบ')}</small></div></div><button className="settings-wide-action" onClick={onUpdate}><RefreshCw size={14} /><div><strong>{l('Check for updates', 'ตรวจสอบอัปเดต')}</strong><small>{l('Downloads and installs only after you confirm', 'ดาวน์โหลดและติดตั้งเมื่อคุณยืนยันเท่านั้น')}</small></div><ChevronRight size={15} /></button><button className="settings-wide-action" onClick={() => api.openLink('https://developers.openai.com/codex/cli')}><ExternalLink size={14} /><div><strong>{l('Codex CLI guide', 'คู่มือ Codex CLI')}</strong><small>{l('Official OpenAI documentation', 'เอกสารทางการจาก OpenAI')}</small></div><ChevronRight size={15} /></button></>}
       </main>
@@ -115,13 +116,77 @@ function FileNode({ node, onOpen, level = 0 }) {
   return <button className="tree-row file-row" style={{ paddingLeft: 25 + level * 14 }} onClick={() => onOpen(node)}><File size={13} /><span>{node.name}</span></button>
 }
 
-function MarkdownMessage({ text }) {
+function MarkdownMessage({ onOpenFile, text }) {
+  const openLink = href => {
+    if (!href) return
+    if (/^https:\/\//i.test(href)) void api.openLink(href)
+    else void onOpenFile(href)
+  }
   return <ReactMarkdown
     remarkPlugins={[remarkGfm]}
     components={{
-      a: ({ href, children }) => <button className="markdown-link" onClick={() => href && api.openLink(href)}>{children}</button>
+      a: ({ href, children }) => <button className="markdown-link" onClick={() => openLink(href)}>{children}</button>
     }}
   >{text}</ReactMarkdown>
+}
+
+function waitForMedia(element, eventName) {
+  return new Promise((resolve, reject) => {
+    const done = () => { cleanup(); resolve() }
+    const fail = () => { cleanup(); reject(new Error('Unable to read this video format.')) }
+    const cleanup = () => {
+      element.removeEventListener(eventName, done)
+      element.removeEventListener('error', fail)
+    }
+    element.addEventListener(eventName, done, { once: true })
+    element.addEventListener('error', fail, { once: true })
+  })
+}
+
+function canvasBlob(canvas) {
+  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Unable to capture a video frame.')), 'image/jpeg', .88))
+}
+
+async function captureVideoFrames(file) {
+  const source = URL.createObjectURL(file)
+  const video = document.createElement('video')
+  video.preload = 'auto'
+  video.muted = true
+  video.src = source
+  const paths = []
+  try {
+    await waitForMedia(video, 'loadedmetadata')
+    if (!Number.isFinite(video.duration) || video.duration <= 0 || !video.videoWidth || !video.videoHeight) throw new Error('Unable to read this video format.')
+    if (video.readyState < 2) await waitForMedia(video, 'loadeddata')
+    const scale = Math.min(1, 1280 / video.videoWidth, 720 / video.videoHeight)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale))
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale))
+    const context = canvas.getContext('2d', { alpha: false })
+    const count = Math.min(8, Math.max(3, Math.ceil(video.duration / 15)))
+    for (let index = 0; index < count; index += 1) {
+      const target = count === 1 ? 0 : Math.min(video.duration - .05, (video.duration * index) / (count - 1))
+      const nextTime = Math.max(0, target)
+      if (Math.abs(video.currentTime - nextTime) > .001) {
+        const seeked = waitForMedia(video, 'seeked')
+        video.currentTime = nextTime
+        await seeked
+      } else {
+        await new Promise(resolve => requestAnimationFrame(resolve))
+      }
+      context.drawImage(video, 0, 0, canvas.width, canvas.height)
+      const blob = await canvasBlob(canvas)
+      paths.push(await api.saveAttachment({ name: `${file.name}-frame-${index + 1}.jpg`, type: 'image/jpeg', data: await blob.arrayBuffer() }))
+    }
+    return paths
+  } catch (error) {
+    if (paths.length) await api.removeAttachments(paths).catch(() => {})
+    throw error
+  } finally {
+    video.removeAttribute('src')
+    video.load()
+    URL.revokeObjectURL(source)
+  }
 }
 
 function diffStats(diff = '') {
@@ -139,7 +204,7 @@ function fileChangeDetails(item) {
   return (Array.isArray(item.changes) ? item.changes : []).map(change => {
     const stats = diffStats(change.diff || change.patch || '')
     return {
-      path: change.path || change.file_path || 'ไฟล์',
+      path: change.path || change.file_path || 'File',
       kind: change.kind || 'update',
       ...stats
     }
@@ -200,6 +265,8 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState('general')
   const [settingsSaving, setSettingsSaving] = useState(false)
+  const [attachments, setAttachments] = useState([])
+  const [attachmentBusy, setAttachmentBusy] = useState(false)
   const codexBuffer = useRef('')
   const conversationEnd = useRef(null)
   const runningRef = useRef(false)
@@ -207,6 +274,9 @@ function App() {
   const leftCtrlPressed = useRef(false)
   const sessionIdRef = useRef(null)
   const workspacePromise = useRef(null)
+  const editorRef = useRef(null)
+  const pendingEditorLocation = useRef(null)
+  const attachmentInput = useRef(null)
 
   const t = (english, thai) => settings.language === 'th' ? thai : english
   const dirty = currentFile && content !== savedContent
@@ -264,7 +334,7 @@ function App() {
     }
     if (event.type === 'stdout') parseCodexOutput(event.data)
     if (event.type === 'stderr' || event.type === 'error') setEvents(items => [...items, { kind: 'error', text: event.data }])
-  }), [])
+  }), [settings.language])
 
   useEffect(() => {
     const keyDown = event => {
@@ -415,9 +485,9 @@ function App() {
       setAllowEdit(saved.defaultAllowEdit)
       setApprovalMode(saved.defaultApproval)
       setSettingsOpen(false)
-      addSystemMessage('บันทึกการตั้งค่าแล้ว ค่าของ Codex จะใช้กับงานถัดไป')
+      addSystemMessage(saved.language === 'th' ? 'บันทึกการตั้งค่าแล้ว ค่าของ Codex จะใช้กับงานถัดไป' : 'Settings saved. Codex will use them for the next task.')
     } catch (error) {
-      alert(`บันทึกการตั้งค่าไม่สำเร็จ: ${error.message}`)
+      alert(t(`Could not save settings: ${error.message}`, `บันทึกการตั้งค่าไม่สำเร็จ: ${error.message}`))
     } finally {
       setSettingsSaving(false)
     }
@@ -431,7 +501,7 @@ function App() {
   }
 
   async function clearLocalData() {
-    if (!confirm('ลบประวัติแชทและจุดย้อนกลับทั้งหมดในเครื่องหรือไม่ การกระทำนี้ย้อนกลับไม่ได้')) return
+    if (!confirm(t('Delete all local chat and undo history? This cannot be undone.', 'ลบประวัติแชทและจุดย้อนกลับทั้งหมดในเครื่องหรือไม่ การกระทำนี้ย้อนกลับไม่ได้'))) return
     try {
       await api.settingsClearLocalData()
       setUndoStack([])
@@ -442,14 +512,14 @@ function App() {
         setConversations(await api.historyList())
       }
       setHistoryReady(true)
-      alert('ลบข้อมูลในเครื่องแล้ว')
+      alert(t('Local data deleted.', 'ลบข้อมูลในเครื่องแล้ว'))
     } catch (error) {
       alert(error.message)
     }
   }
 
   async function uninstallApp() {
-    if (!confirm('ถอนการติดตั้ง CodexDesk หรือไม่ ประวัติแชทและการตั้งค่าจะยังถูกเก็บไว้')) return
+    if (!confirm(t('Uninstall CodexDesk? Chat history and settings will be kept.', 'ถอนการติดตั้ง CodexDesk หรือไม่ ประวัติแชทและการตั้งค่าจะยังถูกเก็บไว้'))) return
     try {
       await api.appUninstall()
     } catch (error) {
@@ -516,10 +586,11 @@ function App() {
     if (project) setFiles(await api.listFiles())
   }
 
-  async function openFile(node) {
-    if (dirty && !confirm('มีการแก้ไขที่ยังไม่ได้บันทึก ต้องการเปิดไฟล์อื่นหรือไม่')) return
+  async function openFile(node, location = null) {
+    if (dirty && !confirm(t('You have unsaved changes. Open another file anyway?', 'มีการแก้ไขที่ยังไม่ได้บันทึก ต้องการเปิดไฟล์อื่นหรือไม่'))) return
     try {
       const text = await api.readFile(node.path)
+      pendingEditorLocation.current = location ? { path: node.path, ...location } : null
       setCurrentFile(node)
       setContent(text)
       setSavedContent(text)
@@ -529,6 +600,36 @@ function App() {
     }
   }
 
+  async function openFileLink(reference) {
+    try {
+      const target = await api.resolveFileLink(reference)
+      await openFile({ path: target.path, name: target.name }, { line: target.line, column: target.column })
+    } catch (error) {
+      alert(error.message)
+    }
+  }
+
+  function mountEditor(editor) {
+    editorRef.current = editor
+  }
+
+  useEffect(() => {
+    const target = pendingEditorLocation.current
+    if (!target || target.path !== currentFile?.path || !editorRef.current) return undefined
+    const timer = setTimeout(() => {
+      const editor = editorRef.current
+      const model = editor?.getModel()
+      if (!editor || !model) return
+      const lineNumber = Math.min(target.line, model.getLineCount())
+      const column = Math.min(target.column, model.getLineMaxColumn(lineNumber))
+      editor.setPosition({ lineNumber, column })
+      editor.revealLineInCenter(lineNumber)
+      editor.focus()
+      pendingEditorLocation.current = null
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [currentFile])
+
   async function saveFile() {
     if (!currentFile) return
     await api.writeFile(currentFile.path, content)
@@ -537,7 +638,7 @@ function App() {
 
   async function loadDiff() {
     const result = await api.gitDiff()
-    setDiff(result.output || 'ไม่มีการเปลี่ยนแปลง')
+    setDiff(result.output || t('No changes', 'ไม่มีการเปลี่ยนแปลง'))
   }
 
   function parseCodexOutput(raw, flush = false) {
@@ -558,7 +659,7 @@ function App() {
         }
         if (event.item && event.item.type !== 'agent_message') updateActivity(event)
         if (event.type === 'error') {
-          setEvents(items => [...items, { kind: 'error', text: event.message || 'Codex ทำงานไม่สำเร็จ' }])
+          setEvents(items => [...items, { kind: 'error', text: event.message || t('Codex could not complete the task.', 'Codex ทำงานไม่สำเร็จ') }])
         }
       } catch {
         if (!/codex_core|Wall time:|Exit code:|rejected: blocked by policy/i.test(line)) {
@@ -571,11 +672,11 @@ function App() {
   function updateActivity(event) {
     const item = event.item
     const id = item.id || `${item.type}-${Date.now()}`
-    const labels = { reasoning: 'กำลังวิเคราะห์', file_change: 'กำลังแก้ไขไฟล์', fileChange: 'กำลังแก้ไขไฟล์', command_execution: 'กำลังรันคำสั่ง', commandExecution: 'กำลังรันคำสั่ง', web_search: 'กำลังค้นหา', webSearch: 'กำลังค้นหา', mcp_tool_call: 'กำลังใช้เครื่องมือ', mcpToolCall: 'กำลังใช้เครื่องมือ' }
+    const labels = { reasoning: t('Thinking', 'กำลังวิเคราะห์'), file_change: t('Editing files', 'กำลังแก้ไขไฟล์'), fileChange: t('Editing files', 'กำลังแก้ไขไฟล์'), command_execution: t('Running command', 'กำลังรันคำสั่ง'), commandExecution: t('Running command', 'กำลังรันคำสั่ง'), web_search: t('Searching', 'กำลังค้นหา'), webSearch: t('Searching', 'กำลังค้นหา'), mcp_tool_call: t('Using tool', 'กำลังใช้เครื่องมือ'), mcpToolCall: t('Using tool', 'กำลังใช้เครื่องมือ') }
     const changes = ['file_change', 'fileChange'].includes(item.type) ? fileChangeDetails(item) : []
     const additions = changes.reduce((total, change) => total + change.additions, 0)
     const deletions = changes.reduce((total, change) => total + change.deletions, 0)
-    const title = changes.length > 0 ? `แก้ไข ${changes.length} ไฟล์` : item.command || item.query || item.name || item.path || labels[item.type] || item.type
+    const title = changes.length > 0 ? t(`Edited ${changes.length} file${changes.length === 1 ? '' : 's'}`, `แก้ไข ${changes.length} ไฟล์`) : item.command || item.query || item.name || item.path || labels[item.type] || item.type
     const output = item.aggregated_output || item.output || item.text || ''
     const status = event.type === 'item.started' ? 'running' : item.status || 'completed'
     setActivity(items => {
@@ -584,6 +685,40 @@ function App() {
       if (index < 0) return [...items.slice(-99), next]
       return items.map((value, position) => position === index ? { ...value, ...next } : value)
     })
+  }
+
+  async function addAttachments(event) {
+    const selected = Array.from(event.target.files || []).slice(0, Math.max(0, 4 - attachments.length))
+    event.target.value = ''
+    if (!selected.length || attachmentBusy) return
+    setAttachmentBusy(true)
+    try {
+      for (const file of selected) {
+        const extension = file.name.split('.').pop()?.toLowerCase()
+        const imageType = /^image\/(png|jpeg|webp)$/i.test(file.type) ? file.type.toLowerCase() : ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' })[extension]
+        const image = Boolean(imageType)
+        const video = /^video\/(mp4|webm|quicktime)$/i.test(file.type) || ['mp4', 'webm', 'mov'].includes(extension)
+        if (!image && !video) throw new Error(t('Use PNG, JPEG, WebP, MP4, WebM, or MOV files.', 'ใช้ไฟล์ PNG, JPEG, WebP, MP4, WebM หรือ MOV'))
+        if (image && file.size > 20 * 1024 * 1024) throw new Error(t('Each image must be 20 MB or smaller.', 'รูปแต่ละไฟล์ต้องมีขนาดไม่เกิน 20 MB'))
+        if (video && file.size > 500 * 1024 * 1024) throw new Error(t('Each video must be 500 MB or smaller.', 'วิดีโอแต่ละไฟล์ต้องมีขนาดไม่เกิน 500 MB'))
+        const paths = image
+          ? [await api.saveAttachment({ name: file.name, type: imageType, data: await file.arrayBuffer() })]
+          : await captureVideoFrames(file)
+        setAttachments(items => [...items, { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: file.name, kind: image ? 'image' : 'video', preview: URL.createObjectURL(file), paths }])
+      }
+    } catch (error) {
+      alert(error.message || t('Could not attach this media.', 'แนบสื่อนี้ไม่สำเร็จ'))
+    } finally {
+      setAttachmentBusy(false)
+    }
+  }
+
+  async function removeAttachment(id) {
+    const target = attachments.find(item => item.id === id)
+    if (!target) return
+    setAttachments(items => items.filter(item => item.id !== id))
+    URL.revokeObjectURL(target.preview)
+    await api.removeAttachments(target.paths).catch(() => {})
   }
 
   async function executeTask(task) {
@@ -597,12 +732,14 @@ function App() {
         const snapshot = await api.undoCreate(task.text)
         setUndoStack(items => [snapshot, ...items].slice(0, 10))
       }
-      const result = await api.codexRun({ prompt: task.text, allowEdit: task.allowEdit, sessionId: sessionIdRef.current })
+      const result = await api.codexRun({ prompt: task.text, allowEdit: task.allowEdit, sessionId: sessionIdRef.current, attachments: task.attachments })
       completed = result.code === 0
       await refreshFiles()
       await loadDiff()
     } catch (error) {
       setEvents(items => [...items, { kind: 'error', text: error.message }])
+    } finally {
+      if (task.attachments?.length) await api.removeAttachments(task.attachments).catch(() => {})
     }
     setActivity(items => items.map(item => item.id === `task-${task.id}` ? { ...item, status: completed ? 'completed' : 'failed' } : item))
     const next = queueRef.current.shift()
@@ -617,8 +754,8 @@ function App() {
 
   async function sendPrompt() {
     const text = prompt.trim()
-    if (!text) return
-    if (text.startsWith('/')) {
+    if (!text && attachments.length === 0) return
+    if (text.startsWith('/') && attachments.length === 0) {
       setPrompt('')
       void runChatCommand(text)
       return
@@ -627,14 +764,20 @@ function App() {
       try {
         await ensureWorkspace()
       } catch (error) {
-        addSystemMessage(`สร้าง Workspace ไม่สำเร็จ: ${error.message}`)
+        addSystemMessage(t(`Could not create the workspace: ${error.message}`, `สร้าง Workspace ไม่สำเร็จ: ${error.message}`))
         return
       }
     }
-    if (allowEdit && approvalMode === 'ask' && !confirm('อนุญาตให้ Codex แก้ไขไฟล์ รันคำสั่ง และใช้ปลั๊กอิน MCP สำหรับงานนี้หรือไม่')) return
-    const task = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text, allowEdit }
+    if (allowEdit && approvalMode === 'ask' && !confirm(t('Allow Codex to edit files, run commands, and use MCP tools for this task?', 'อนุญาตให้ Codex แก้ไขไฟล์ รันคำสั่ง และใช้ปลั๊กอิน MCP สำหรับงานนี้หรือไม่'))) return
+    const submitted = attachments
+    const request = text || t('Analyze the attached media.', 'วิเคราะห์สื่อที่แนบมา')
+    const attachmentPaths = submitted.flatMap(item => item.paths)
+    const task = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text: request, allowEdit, attachments: attachmentPaths }
     setPrompt('')
-    setEvents(items => [...items, { id: task.id, kind: 'user', text, queued: runningRef.current }])
+    setAttachments([])
+    submitted.forEach(item => URL.revokeObjectURL(item.preview))
+    const attachmentLabel = submitted.length ? `\n\n${t('Attachments', 'ไฟล์แนบ')}: ${submitted.map(item => item.name).join(', ')}` : ''
+    setEvents(items => [...items, { id: task.id, kind: 'user', text: `${request}${attachmentLabel}`, queued: runningRef.current }])
     if (runningRef.current) {
       queueRef.current.push(task)
       setQueue([...queueRef.current])
@@ -651,7 +794,7 @@ function App() {
     const [name, ...args] = input.trim().split(/\s+/)
     const command = name.toLowerCase()
     if (command === '/help') {
-      addSystemMessage(`### คำสั่ง CodexDesk\n${CHAT_COMMANDS.map(item => `- \`${item.name}\` ${item.description}`).join('\n')}`)
+      addSystemMessage(`${t('### CodexDesk commands', '### คำสั่ง CodexDesk')}\n${CHAT_COMMANDS.map(item => `- \`${item.name}\` ${settings.language === 'th' ? item.description : item.descriptionEn}`).join('\n')}`)
       return
     }
     if (command === '/new') {
@@ -663,13 +806,13 @@ function App() {
       return
     }
     if (command === '/status') {
-      addSystemMessage(`### สถานะ\n- โปรเจกต์: **${project?.name || 'ยังไม่ได้เปิด'}**\n- บัญชี: **${authenticated ? 'เชื่อมต่อแล้ว' : 'ยังไม่เชื่อมต่อ'}**\n- Codex: **${running ? 'กำลังทำงาน' : 'พร้อมใช้งาน'}**\n- คิว: **${queue.length}**\n- สิทธิ์: **${allowEdit ? 'แก้ไขไฟล์ได้' : 'อ่านอย่างเดียว'}**\n- การอนุมัติ: **${approvalMode === 'ask' ? 'ถามก่อน' : 'อัตโนมัติ'}**`)
+      addSystemMessage(settings.language === 'th' ? `### สถานะ\n- โปรเจกต์: **${project?.name || 'ยังไม่ได้เปิด'}**\n- บัญชี: **${authenticated ? 'เชื่อมต่อแล้ว' : 'ยังไม่เชื่อมต่อ'}**\n- Codex: **${running ? 'กำลังทำงาน' : 'พร้อมใช้งาน'}**\n- คิว: **${queue.length}**\n- สิทธิ์: **${allowEdit ? 'แก้ไขไฟล์ได้' : 'อ่านอย่างเดียว'}**\n- การอนุมัติ: **${approvalMode === 'ask' ? 'ถามก่อน' : 'อัตโนมัติ'}**` : `### Status\n- Project: **${project?.name || 'Not open'}**\n- Account: **${authenticated ? 'Connected' : 'Not connected'}**\n- Codex: **${running ? 'Working' : 'Ready'}**\n- Queue: **${queue.length}**\n- Permission: **${allowEdit ? 'Workspace write' : 'Read only'}**\n- Approval: **${approvalMode === 'ask' ? 'Ask first' : 'Automatic'}**`)
       return
     }
     if (command === '/diff') {
       await loadDiff()
       setMobileView('editor')
-      addSystemMessage('เปิด Git Diff แล้ว')
+      addSystemMessage(t('Opened Git Diff.', 'เปิด Git Diff แล้ว'))
       return
     }
     if (command === '/files') {
@@ -686,27 +829,27 @@ function App() {
     }
     if (command === '/readonly') {
       setAllowEdit(false)
-      addSystemMessage('เปลี่ยนเป็นโหมดอ่านอย่างเดียวแล้ว')
+      addSystemMessage(t('Switched to read-only mode.', 'เปลี่ยนเป็นโหมดอ่านอย่างเดียวแล้ว'))
       return
     }
     if (command === '/write') {
       setAllowEdit(true)
-      addSystemMessage('อนุญาตให้ Codex แก้ไขไฟล์แล้ว')
+      addSystemMessage(t('Workspace write enabled.', 'อนุญาตให้ Codex แก้ไขไฟล์แล้ว'))
       return
     }
     if (command === '/approval') {
       const mode = args[0]?.toLowerCase()
       if (!['ask', 'auto'].includes(mode)) {
-        addSystemMessage('ใช้ `/approval ask` หรือ `/approval auto`')
+        addSystemMessage(t('Use `/approval ask` or `/approval auto`.', 'ใช้ `/approval ask` หรือ `/approval auto`'))
         return
       }
       setApprovalMode(mode)
-      addSystemMessage(mode === 'ask' ? 'ตั้งเป็นถามก่อนเริ่มงานแล้ว' : 'ตั้งเป็นทำงานอัตโนมัติแล้ว')
+      addSystemMessage(mode === 'ask' ? t('Approval mode set to ask first.', 'ตั้งเป็นถามก่อนเริ่มงานแล้ว') : t('Approval mode set to automatic.', 'ตั้งเป็นทำงานอัตโนมัติแล้ว'))
       return
     }
     if (command === '/update') {
       openUpdate()
-      addSystemMessage('กำลังตรวจอัปเดต')
+      addSystemMessage(t('Checking for updates.', 'กำลังตรวจอัปเดต'))
       return
     }
     if (command === '/copy') {
@@ -737,34 +880,36 @@ function App() {
       const mode = args[0]?.toLowerCase()
       const value = mode === 'off' ? 'disabled' : mode
       if (!['cached', 'live', 'disabled'].includes(value)) {
-        addSystemMessage('ใช้ `/search cached`, `/search live` หรือ `/search off`')
+        addSystemMessage(t('Use `/search cached`, `/search live`, or `/search off`.', 'ใช้ `/search cached`, `/search live` หรือ `/search off`'))
         return
       }
       await applySettingPatch({ webSearch: value })
-      addSystemMessage(value === 'live' ? 'เปิดค้นเว็บแบบข้อมูลล่าสุดแล้ว' : value === 'cached' ? 'เปิดค้นเว็บผ่านดัชนีของ OpenAI แล้ว' : 'ปิดการค้นเว็บแล้ว')
+      addSystemMessage(value === 'live' ? t('Live web search enabled.', 'เปิดค้นเว็บแบบข้อมูลล่าสุดแล้ว') : value === 'cached' ? t('Cached OpenAI web search enabled.', 'เปิดค้นเว็บผ่านดัชนีของ OpenAI แล้ว') : t('Web search disabled.', 'ปิดการค้นเว็บแล้ว'))
       return
     }
     if (command === '/personality') {
       const value = args[0]?.toLowerCase()
       if (!['pragmatic', 'friendly', 'none'].includes(value)) {
-        addSystemMessage('ใช้ `/personality pragmatic`, `/personality friendly` หรือ `/personality none`')
+        addSystemMessage(t('Use `/personality pragmatic`, `/personality friendly`, or `/personality none`.', 'ใช้ `/personality pragmatic`, `/personality friendly` หรือ `/personality none`'))
         return
       }
       await applySettingPatch({ personality: value })
-      addSystemMessage(`ตั้งบุคลิกเป็น **${value}** แล้ว`)
+      addSystemMessage(t(`Personality set to **${value}**.`, `ตั้งบุคลิกเป็น **${value}** แล้ว`))
       return
     }
     if (command === '/stop') {
       stopCodex()
-      addSystemMessage('หยุดงานและล้างคิวแล้ว')
+      addSystemMessage(t('Stopped the task and cleared the queue.', 'หยุดงานและล้างคิวแล้ว'))
       return
     }
-    addSystemMessage(`ไม่พบคำสั่ง \`${name}\` พิมพ์ \`/help\` เพื่อดูคำสั่งทั้งหมด`)
+    addSystemMessage(t(`Unknown command \`${name}\`. Type \`/help\` to see all commands.`, `ไม่พบคำสั่ง \`${name}\` พิมพ์ \`/help\` เพื่อดูคำสั่งทั้งหมด`))
   }
 
   function stopCodex() {
+    const pendingAttachments = queueRef.current.flatMap(task => task.attachments || [])
     queueRef.current = []
     setQueue([])
+    if (pendingAttachments.length) void api.removeAttachments(pendingAttachments)
     api.codexStop()
   }
 
@@ -821,15 +966,15 @@ function App() {
   }
 
   async function copyChat() {
-    const transcript = events.map(event => `${event.kind === 'user' ? 'คุณ' : event.kind === 'system' ? 'ระบบ' : 'Codex'}\n${event.text}`).join('\n\n')
+    const transcript = events.map(event => `${event.kind === 'user' ? t('You', 'คุณ') : event.kind === 'system' ? t('System', 'ระบบ') : 'Codex'}\n${event.text}`).join('\n\n')
     await api.copyText(transcript)
-    addSystemMessage('คัดลอกแชททั้งหมดแล้ว')
+    addSystemMessage(t('Copied the full chat.', 'คัดลอกแชททั้งหมดแล้ว'))
   }
 
   async function undoLastTask() {
     const snapshot = undoStack[0]
     if (!snapshot || running) return
-    if (!confirm(`ย้อนกลับไฟล์ทั้งหมดไปก่อนงาน "${snapshot.label || 'ล่าสุด'}" หรือไม่`)) return
+    if (!confirm(t(`Restore all files to before "${snapshot.label || 'the latest task'}"?`, `ย้อนกลับไฟล์ทั้งหมดไปก่อนงาน "${snapshot.label || 'ล่าสุด'}" หรือไม่`))) return
     try {
       await api.undoRestore(snapshot.id)
       setUndoStack(await api.undoList())
@@ -846,22 +991,22 @@ function App() {
           setSavedContent('')
         }
       }
-      addSystemMessage('ย้อนกลับไฟล์ไปก่อนงานล่าสุดแล้ว')
+      addSystemMessage(t('Restored files to before the latest task.', 'ย้อนกลับไฟล์ไปก่อนงานล่าสุดแล้ว'))
     } catch (error) {
-      addSystemMessage(`ย้อนกลับไม่สำเร็จ: ${error.message}`)
+      addSystemMessage(t(`Undo failed: ${error.message}`, `ย้อนกลับไม่สำเร็จ: ${error.message}`))
     }
   }
 
   async function signOut() {
     if (!authenticated || running) return
-    if (!confirm('ออกจากระบบ ChatGPT ใน CodexDesk หรือไม่')) return
+    if (!confirm(t('Sign out of ChatGPT in CodexDesk?', 'ออกจากระบบ ChatGPT ใน CodexDesk หรือไม่'))) return
     try {
       await api.authLogout()
       setAuthenticated(false)
       setAuthOpen(false)
-      addSystemMessage('ออกจากระบบ ChatGPT แล้ว')
+      addSystemMessage(t('Signed out of ChatGPT.', 'ออกจากระบบ ChatGPT แล้ว'))
     } catch (error) {
-      addSystemMessage(`ออกจากระบบไม่สำเร็จ: ${error.message}`)
+      addSystemMessage(t(`Sign out failed: ${error.message}`, `ออกจากระบบไม่สำเร็จ: ${error.message}`))
     }
   }
 
@@ -906,7 +1051,7 @@ function App() {
           <button className="save-button" disabled={!dirty} onClick={saveFile}><Save size={14} />{t('Save', 'บันทึก')}</button>
         </div>
         <div className="editor-wrap">
-          <Editor value={content} onChange={value => setContent(value ?? '')} language={language} theme="vs-dark" options={{ minimap: { enabled: true }, fontFamily: 'Cascadia Mono, Consolas, monospace', fontSize: 14, padding: { top: 16 }, smoothScrolling: true, cursorSmoothCaretAnimation: 'on', renderLineHighlight: 'all', wordWrap: 'off', automaticLayout: true }} />
+          <Editor value={content} onChange={value => setContent(value ?? '')} onMount={mountEditor} language={language} theme="vs-dark" options={{ minimap: { enabled: true }, fontFamily: 'Cascadia Mono, Consolas, monospace', fontSize: 14, padding: { top: 16 }, smoothScrolling: true, cursorSmoothCaretAnimation: 'on', renderLineHighlight: 'all', wordWrap: 'off', automaticLayout: true }} />
         </div>
         <div className="bottom-panel">
           <div className="diff-heading"><GitCompare size={14} /><span>Git Diff</span><button onClick={loadDiff}><RefreshCw size={13} />{t('Refresh', 'รีเฟรช')}</button></div>
@@ -920,7 +1065,7 @@ function App() {
         <div className="agent-meta"><span>Local workspace</span><span>{allowEdit ? 'Workspace write' : 'Read only'}</span></div>
         <div className="conversation">
           {events.length === 0 && <div className="welcome"><span className="welcome-kicker">CODEX WORKSPACE</span><div className="welcome-icon"><Bot size={22} /></div><h2>{t('What would you like to build?', 'วันนี้ต้องการสร้างอะไร')}</h2><p>{t('Ask Codex to create, inspect, or edit code. No folder is required.', 'สั่งให้ Codex สร้าง อ่าน ตรวจสอบ หรือแก้ไขงานได้โดยไม่ต้องเปิดโฟลเดอร์')}</p><div className="welcome-actions"><button onClick={() => setPrompt(t('Inspect this project and summarize improvements', 'ตรวจสอบโครงสร้างโปรเจกต์และสรุปสิ่งที่ควรปรับปรุง'))}><Search size={13} /><span>{t('Inspect project', 'ตรวจโปรเจกต์')}</span></button><button onClick={() => setPrompt(t('Find potential bugs and fix them safely', 'ค้นหาบัคที่อาจเกิดขึ้นและแก้ไขให้ปลอดภัย'))}><ShieldCheck size={13} /><span>{t('Find bugs', 'ค้นหาบัค')}</span></button><button onClick={() => setPrompt(t('Create a new project for me. Ask only for essential requirements.', 'สร้างโปรเจกต์ใหม่ให้ฉัน ถามเฉพาะข้อมูลที่จำเป็น'))}><Code2 size={13} /><span>{t('New project', 'สร้างโปรเจกต์')}</span></button></div></div>}
-          {events.map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><div className="message-label"><span>{event.kind === 'user' ? event.queued ? t('You · queued', 'คุณ · อยู่ในคิว') : t('You', 'คุณ') : event.kind === 'system' ? t('System', 'ระบบ') : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title={t('Copy message', 'คัดลอกข้อความ')}><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage text={event.text} /></div></motion.div>)}
+          {events.map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><div className="message-label"><span>{event.kind === 'user' ? event.queued ? t('You · queued', 'คุณ · อยู่ในคิว') : t('You', 'คุณ') : event.kind === 'system' ? t('System', 'ระบบ') : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title={t('Copy message', 'คัดลอกข้อความ')}><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage onOpenFile={openFileLink} text={event.text} /></div></motion.div>)}
           {running && <div className="thinking"><i /><i /><i /></div>}
           <div ref={conversationEnd} className="conversation-end" />
         </div>
@@ -936,15 +1081,18 @@ function App() {
         </motion.div>}</AnimatePresence>
         <div className="composer">
           {commandSuggestions.length > 0 && <div className="command-menu"><div className="command-menu-label"><Command size={12} />{t('Commands', 'คำสั่ง')}</div>{commandSuggestions.map(command => <button key={command.name} onClick={() => setPrompt(command.name === '/approval' ? '/approval ' : command.name)}><code>{command.name}</code><span>{settings.language === 'th' ? command.description : command.descriptionEn}</span></button>)}</div>}
+          <input ref={attachmentInput} className="attachment-input" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" multiple onChange={addAttachments} />
+          {(attachments.length > 0 || attachmentBusy) && <div className="attachment-strip">{attachments.map(item => <div className="attachment-card" key={item.id}>{item.kind === 'image' ? <img src={item.preview} alt="" /> : <video src={item.preview} muted preload="metadata" />}<span>{item.kind === 'image' ? <ImageIcon size={11} /> : <Video size={11} />}{item.name}</span><button onClick={() => removeAttachment(item.id)} title={t('Remove attachment', 'ลบไฟล์แนบ')}><X size={11} /></button></div>)}{attachmentBusy && <div className="attachment-processing"><i />{t('Processing media', 'กำลังประมวลผลสื่อ')}</div>}</div>}
           <textarea value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { const send = settings.sendMode === 'ctrl-enter' ? event.key === 'Enter' && event.ctrlKey : event.key === 'Enter' && !event.shiftKey; if (send) { event.preventDefault(); void sendPrompt() } }} placeholder={project ? t('Ask Codex…', 'สั่งงาน Codex…') : t('Ask Codex to create something new…', 'สั่งให้ Codex สร้างงานใหม่…')} />
           {queue.length > 0 && <div className="queue-indicator">{t(`${queue.length} message${queue.length === 1 ? '' : 's'} waiting`, `มี ${queue.length} ข้อความรอทำงาน`)}</div>}
           <div className="composer-footer">
             <div className="composer-options">
+              <button className="attach-button" onClick={() => attachmentInput.current?.click()} disabled={attachmentBusy || attachments.length >= 4} title={t('Attach image or video', 'แนบรูปหรือวิดีโอ')}><Paperclip size={13} />{attachments.length > 0 && <b>{attachments.length}</b>}</button>
               <button className="permission" onClick={() => setAllowEdit(value => !value)}><span className={allowEdit ? 'enabled' : ''} />{allowEdit ? t('Workspace write', 'แก้ไขไฟล์ได้') : t('Read only', 'อ่านอย่างเดียว')}</button>
               <button className="approval-mode" onClick={() => setApprovalMode(value => value === 'ask' ? 'auto' : 'ask')} title={t('Approval mode', 'รูปแบบการอนุมัติ')}><ShieldCheck size={13} />{approvalMode === 'ask' ? t('Ask first', 'ถามก่อน') : t('Automatic', 'อัตโนมัติ')}</button>
               <button className="model-chip" onClick={() => openSettings('model')} title={t('Choose model and reasoning', 'เลือกโมเดลและระดับการคิด')}><Brain size={13} />{settings.model ? settings.model.replace('gpt-', '') : 'Auto'} · {settings.reasoningEffort}</button>
             </div>
-            <button className="send-button" onClick={() => void sendPrompt()} disabled={!prompt.trim()}><Send size={15} /></button>
+            <button className="send-button" onClick={() => void sendPrompt()} disabled={attachmentBusy || (!prompt.trim() && attachments.length === 0)}><Send size={15} /></button>
           </div>
         </div>
       </aside>
@@ -956,7 +1104,7 @@ function App() {
       <motion.div className="mcp-modal" initial={{ opacity: 0, scale: .97, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .98 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
         <div className="mcp-heading"><div><span className="mcp-symbol"><Plug size={17} /></span><div><h2>{t('MCP plugins', 'ปลั๊กอิน MCP')}</h2><p>{t('Connect external tools to Codex', 'เชื่อมเครื่องมือภายนอกเข้ากับ Codex')}</p></div></div><div><button className="mcp-add" onClick={() => setMcpFormOpen(value => !value)}><Plus size={13} />{t('Add custom', 'เพิ่มเอง')}</button><button className="modal-close static" onClick={() => setMcpOpen(false)}><X size={16} /></button></div></div>
         <div className="mcp-content">
-          <section className="mcp-presets"><span className="mcp-section-label">{t('Quick install', 'ติดตั้งด่วน')}</span><div>{MCP_PRESETS.map(preset => { const installed = mcpServers.some(server => server.name === preset.name); return <button key={preset.name} disabled={installed || mcpBusy || running} onClick={() => installPreset(preset)}><span><Server size={15} /></span><div><strong>{preset.label}</strong><small>{preset.description}</small></div><i>{installed ? t('Installed', 'ติดตั้งแล้ว') : t('Install', 'ติดตั้ง')}</i></button> })}</div></section>
+          <section className="mcp-presets"><span className="mcp-section-label">{t('Quick install', 'ติดตั้งด่วน')}</span><div>{MCP_PRESETS.map(preset => { const installed = mcpServers.some(server => server.name === preset.name); return <button key={preset.name} disabled={installed || mcpBusy || running} onClick={() => installPreset(preset)}><span><Server size={15} /></span><div><strong>{preset.label}</strong><small>{settings.language === 'th' ? preset.description : preset.descriptionEn}</small></div><i>{installed ? t('Installed', 'ติดตั้งแล้ว') : t('Install', 'ติดตั้ง')}</i></button> })}</div></section>
           <AnimatePresence>{mcpFormOpen && <motion.section className="mcp-form" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
             <div className="mcp-form-tabs"><button className={mcpForm.transport === 'http' ? 'active' : ''} onClick={() => setMcpForm(value => ({ ...value, transport: 'http' }))}><Globe2 size={12} />HTTP</button><button className={mcpForm.transport === 'stdio' ? 'active' : ''} onClick={() => setMcpForm(value => ({ ...value, transport: 'stdio' }))}><SquareTerminal size={12} />STDIO</button></div>
             <input value={mcpForm.name} onChange={event => setMcpForm(value => ({ ...value, name: event.target.value }))} placeholder={t('Plugin name', 'ชื่อปลั๊กอิน')} maxLength={40} />

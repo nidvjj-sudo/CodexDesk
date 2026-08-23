@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, powerSaveBlocker, shell } = require('electron')
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, powerSaveBlocker, shell, Tray } = require('electron')
 const { spawn } = require('child_process')
 const { createHash, randomUUID } = require('crypto')
 const { existsSync, mkdirSync, watch } = require('fs')
@@ -16,6 +16,15 @@ let projectWatchTimer
 let historyMutation = Promise.resolve()
 let updateState = { status: 'idle', version: null, percent: 0 }
 let powerSaveBlockerId = null
+let currentAppSettings
+let discordClient
+let discordClientId = ''
+let discordReady = false
+let discordActivity = 'ready'
+let discordOutputBuffer = ''
+let tray
+let isQuitting = false
+const appStartedAt = new Date()
 
 const defaultAppSettings = Object.freeze({
   language: 'en',
@@ -35,8 +44,17 @@ const defaultAppSettings = Object.freeze({
   memoriesEnabled: false,
   useMemories: true,
   generateMemories: true,
-  disableMemoriesOnExternal: true
+  disableMemoriesOnExternal: true,
+  discordPresence: false,
+  discordClientId: '',
+  discordShowProject: true
 })
+
+currentAppSettings = { ...defaultAppSettings }
+
+function uiText(english, thai) {
+  return currentAppSettings.language === 'th' ? thai : english
+}
 
 function settingsFile() {
   return path.join(app.getPath('userData'), 'settings.json')
@@ -62,15 +80,22 @@ function normalizeAppSettings(input = {}) {
     memoriesEnabled: input.memoriesEnabled === true,
     useMemories: input.useMemories !== false,
     generateMemories: input.generateMemories !== false,
-    disableMemoriesOnExternal: input.disableMemoriesOnExternal !== false
+    disableMemoriesOnExternal: input.disableMemoriesOnExternal !== false,
+    discordPresence: input.discordPresence === true,
+    discordClientId: typeof input.discordClientId === 'string' && /^\d{15,24}$/.test(input.discordClientId.trim()) ? input.discordClientId.trim() : '',
+    discordShowProject: input.discordShowProject !== false
   }
 }
 
 async function readAppSettings() {
   try {
-    return normalizeAppSettings(JSON.parse(await fs.readFile(settingsFile(), 'utf8')))
+    currentAppSettings = normalizeAppSettings(JSON.parse(await fs.readFile(settingsFile(), 'utf8')))
+    return currentAppSettings
   } catch (error) {
-    if (error.code === 'ENOENT' || error instanceof SyntaxError) return { ...defaultAppSettings }
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) {
+      currentAppSettings = { ...defaultAppSettings }
+      return currentAppSettings
+    }
     throw error
   }
 }
@@ -140,6 +165,114 @@ function applyPowerSetting(settings) {
   }
 }
 
+function discordLabels(kind) {
+  const labels = {
+    ready: uiText('Ready to code', 'พร้อมเขียนโค้ด'),
+    thinking: uiText('Thinking with Codex', 'กำลังวิเคราะห์ด้วย Codex'),
+    editing: uiText('Editing files', 'กำลังแก้ไขไฟล์'),
+    command: uiText('Running a command', 'กำลังรันคำสั่ง'),
+    search: uiText('Searching the web', 'กำลังค้นเว็บ'),
+    mcp: uiText('Using an MCP tool', 'กำลังใช้เครื่องมือ MCP')
+  }
+  return labels[kind] || labels.thinking
+}
+
+function updateDiscordActivity(kind = discordActivity) {
+  discordActivity = kind
+  updateTrayMenu()
+  if (!discordReady || !discordClient?.user) return
+  const state = currentAppSettings.discordShowProject && projectRoot
+    ? uiText(`In ${path.basename(projectRoot)}`, `ใน ${path.basename(projectRoot)}`)
+    : 'CodexDesk'
+  discordClient.user.setActivity({ details: discordLabels(kind), state, startTimestamp: appStartedAt, instance: false }).catch(() => {})
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow()
+  mainWindow.show()
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.focus()
+}
+
+function updateTrayMenu() {
+  if (!tray) return
+  tray.setToolTip(`CodexDesk - ${discordLabels(discordActivity)}`)
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: discordLabels(discordActivity), enabled: false },
+    { type: 'separator' },
+    { label: uiText('Open CodexDesk', 'เปิด CodexDesk'), click: showMainWindow },
+    { label: uiText('Exit', 'ปิดแอป'), click: () => { isQuitting = true; app.quit() } }
+  ]))
+}
+
+function createTray() {
+  if (tray) return
+  const icon = path.join(__dirname, '..', 'build', 'icon.png')
+  tray = new Tray(icon)
+  tray.on('click', showMainWindow)
+  tray.on('double-click', showMainWindow)
+  updateTrayMenu()
+}
+
+async function stopDiscordPresence() {
+  const client = discordClient
+  discordClient = undefined
+  discordClientId = ''
+  discordReady = false
+  if (client?.destroy) await Promise.resolve(client.destroy()).catch(() => {})
+}
+
+async function applyDiscordPresence(settings) {
+  currentAppSettings = settings
+  updateTrayMenu()
+  if (!settings.discordPresence || !settings.discordClientId) {
+    await stopDiscordPresence()
+    return
+  }
+  if (discordClient && discordClientId === settings.discordClientId) {
+    updateDiscordActivity()
+    return
+  }
+  await stopDiscordPresence()
+  try {
+    const { Client } = require('@xhayper/discord-rpc')
+    const client = new Client({ clientId: settings.discordClientId })
+    discordClient = client
+    discordClientId = settings.discordClientId
+    client.on('ready', () => {
+      if (discordClient !== client) return
+      discordReady = true
+      updateDiscordActivity()
+    })
+    client.on('disconnected', () => {
+      if (discordClient === client) discordReady = false
+    })
+    void client.login().catch(() => {
+      if (discordClient === client) void stopDiscordPresence()
+    })
+  } catch {
+    await stopDiscordPresence()
+  }
+}
+
+function updateDiscordFromCodexOutput(value) {
+  discordOutputBuffer += String(value)
+  const lines = discordOutputBuffer.split(/\r?\n/)
+  discordOutputBuffer = lines.pop() || ''
+  for (const line of lines) {
+    try {
+      const event = JSON.parse(line)
+      if (event.type !== 'item.started') continue
+      const type = event.item?.type
+      if (['file_change', 'fileChange'].includes(type)) updateDiscordActivity('editing')
+      else if (['command_execution', 'commandExecution'].includes(type)) updateDiscordActivity('command')
+      else if (['web_search', 'webSearch'].includes(type)) updateDiscordActivity('search')
+      else if (['mcp_tool_call', 'mcpToolCall'].includes(type)) updateDiscordActivity('mcp')
+      else updateDiscordActivity('thinking')
+    } catch {}
+  }
+}
+
 async function saveAppSettings(input) {
   const settings = normalizeAppSettings(input)
   const file = settingsFile()
@@ -148,6 +281,7 @@ async function saveAppSettings(input) {
   await fs.writeFile(temporary, JSON.stringify(settings, null, 2), 'utf8')
   await fs.rename(temporary, file)
   applyPowerSetting(settings)
+  await applyDiscordPresence(settings)
   return settings
 }
 
@@ -188,12 +322,12 @@ function cleanProcessText(value) {
 
 function explainCodexFailure(value) {
   const text = cleanProcessText(value).trim()
-  if (/not logged in|login required|unauthorized|\b401\b/i.test(text)) return 'บัญชี ChatGPT หมดอายุ กรุณาเชื่อมต่อบัญชีใหม่'
-  if (/unexpected argument|invalid value|Usage:/i.test(text)) return 'Codex runtime ไม่รองรับคำสั่งนี้ กรุณาอัปเดต CodexDesk'
-  if (/models cache|base_instructions/i.test(text)) return 'ข้อมูลโมเดล Codex ไม่สมบูรณ์ กรุณาปิดแอปแล้วเปิดใหม่'
-  if (/blocked by policy|rejected: blocked/i.test(text)) return 'Windows บล็อกคำสั่งของ Codex กรุณาเปิดโหมดแก้ไขไฟล์ได้แล้วลองใหม่'
+  if (/not logged in|login required|unauthorized|\b401\b/i.test(text)) return uiText('Your ChatGPT session expired. Connect your account again.', 'บัญชี ChatGPT หมดอายุ กรุณาเชื่อมต่อบัญชีใหม่')
+  if (/unexpected argument|invalid value|Usage:/i.test(text)) return uiText('The Codex runtime does not support this command. Update CodexDesk.', 'Codex runtime ไม่รองรับคำสั่งนี้ กรุณาอัปเดต CodexDesk')
+  if (/models cache|base_instructions/i.test(text)) return uiText('The Codex model cache is incomplete. Restart CodexDesk.', 'ข้อมูลโมเดล Codex ไม่สมบูรณ์ กรุณาปิดแอปแล้วเปิดใหม่')
+  if (/blocked by policy|rejected: blocked/i.test(text)) return uiText('Windows blocked a Codex command. Enable workspace write and try again.', 'Windows บล็อกคำสั่งของ Codex กรุณาเปิดโหมดแก้ไขไฟล์ได้แล้วลองใหม่')
   const detail = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !/codex_core|Wall time:|^\d{4}-\d{2}-\d{2}T/.test(line)).at(-1)
-  return detail ? `Codex ทำงานไม่สำเร็จ: ${detail.slice(0, 240)}` : 'Codex ทำงานไม่สำเร็จ กรุณาลองสั่งงานใหม่'
+  return detail ? uiText(`Codex failed: ${detail.slice(0, 240)}`, `Codex ทำงานไม่สำเร็จ: ${detail.slice(0, 240)}`) : uiText('Codex could not complete the task. Try again.', 'Codex ทำงานไม่สำเร็จ กรุณาลองสั่งงานใหม่')
 }
 
 function createWindow() {
@@ -215,6 +349,11 @@ function createWindow() {
 
   if (!app.isPackaged) mainWindow.loadURL('http://127.0.0.1:5173')
   else mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
+  mainWindow.on('close', event => {
+    if (isQuitting) return
+    event.preventDefault()
+    mainWindow.hide()
+  })
 }
 
 function publishUpdateState(next) {
@@ -243,15 +382,106 @@ function setupAutoUpdater() {
 }
 
 function safePath(input) {
-  if (!projectRoot) throw new Error('ยังไม่ได้เปิดโปรเจกต์')
+  if (!projectRoot) throw new Error(uiText('No project is open.', 'ยังไม่ได้เปิดโปรเจกต์'))
   const resolved = path.resolve(input)
   const relative = path.relative(projectRoot, resolved)
-  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('ไม่อนุญาตให้เข้าถึงไฟล์นอกโปรเจกต์')
+  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(uiText('Files outside the project are not allowed.', 'ไม่อนุญาตให้เข้าถึงไฟล์นอกโปรเจกต์'))
   return resolved
 }
 
+function parseFileReference(input) {
+  let reference = String(input || '').trim()
+  if (!reference || /^https?:\/\//i.test(reference)) return null
+  try { reference = decodeURIComponent(reference) } catch {}
+  reference = reference.replace(/^file:\/\/\/?/i, '').replace(/^sandbox:/i, '')
+  if (process.platform === 'win32' && /^\/[a-zA-Z]:[\\/]/.test(reference)) reference = reference.slice(1)
+
+  let line = 1
+  let column = 1
+  const hashIndex = reference.lastIndexOf('#')
+  if (hashIndex >= 0) {
+    const fragment = reference.slice(hashIndex + 1)
+    reference = reference.slice(0, hashIndex)
+    const location = fragment.match(/^L(\d+)(?:C(\d+))?(?:-L?\d+(?:C\d+)?)?$/i)
+    if (location) {
+      line = Number(location[1])
+      column = Number(location[2] || 1)
+    }
+  } else {
+    const location = reference.match(/:(\d+)(?::(\d+))?$/)
+    if (location) {
+      line = Number(location[1])
+      column = Number(location[2] || 1)
+      reference = reference.slice(0, location.index)
+    }
+  }
+
+  reference = reference.replace(/[?#].*$/, '').trim()
+  if (!reference || !Number.isSafeInteger(line) || line < 1 || !Number.isSafeInteger(column) || column < 1) return null
+  return { reference, line, column }
+}
+
+async function resolveProjectFileReference(input) {
+  if (!projectRoot) throw new Error(uiText('No project is open.', 'ยังไม่ได้เปิดโปรเจกต์'))
+  const parsed = parseFileReference(input)
+  if (!parsed) throw new Error(uiText('Invalid file link.', 'ลิงก์ไฟล์ไม่ถูกต้อง'))
+
+  const candidate = safePath(path.isAbsolute(parsed.reference) ? parsed.reference : path.join(projectRoot, parsed.reference))
+  try {
+    const stat = await fs.stat(candidate)
+    if (!stat.isFile()) throw new Error(uiText('This link does not point to a file.', 'ลิงก์นี้ไม่ใช่ไฟล์'))
+    return { path: candidate, name: path.basename(candidate), line: parsed.line, column: parsed.column }
+  } catch (error) {
+    if (error.code !== 'ENOENT' || parsed.reference.includes('/') || parsed.reference.includes('\\')) throw error
+  }
+
+  const matches = []
+  const collect = nodes => nodes.forEach(node => node.directory ? collect(node.children || []) : node.name.toLowerCase() === parsed.reference.toLowerCase() && matches.push(node))
+  collect(await walk(projectRoot))
+  if (matches.length === 0) throw new Error(uiText(`File not found: ${parsed.reference}`, `ไม่พบไฟล์ ${parsed.reference}`))
+  if (matches.length > 1) throw new Error(uiText(`More than one file is named ${parsed.reference}. Include its folder.`, `พบไฟล์ชื่อ ${parsed.reference} มากกว่าหนึ่งไฟล์ กรุณาระบุโฟลเดอร์`))
+  return { path: matches[0].path, name: matches[0].name, line: parsed.line, column: parsed.column }
+}
+
+function attachmentDirectory() {
+  return path.join(app.getPath('temp'), 'codexdesk-attachments')
+}
+
+function safeAttachmentPath(input) {
+  const directory = path.resolve(attachmentDirectory())
+  const target = path.resolve(String(input || ''))
+  const relative = path.relative(directory, target)
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(uiText('Invalid attachment path.', 'ตำแหน่งไฟล์แนบไม่ถูกต้อง'))
+  return target
+}
+
+async function saveAttachment(input = {}) {
+  const extensions = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' }
+  const extension = extensions[String(input.type || '').toLowerCase()]
+  if (!extension) throw new Error(uiText('Only PNG, JPEG, and WebP images are supported.', 'รองรับเฉพาะรูป PNG, JPEG และ WebP'))
+  const data = Buffer.from(input.data || [])
+  if (!data.length || data.length > 20 * 1024 * 1024) throw new Error(uiText('Each image must be between 1 byte and 20 MB.', 'รูปแต่ละไฟล์ต้องมีขนาดไม่เกิน 20 MB'))
+  const directory = attachmentDirectory()
+  await fs.mkdir(directory, { recursive: true })
+  const file = path.join(directory, `${Date.now()}-${randomUUID()}${extension}`)
+  await fs.writeFile(file, data)
+  return file
+}
+
+async function validateTaskAttachments(inputs) {
+  const files = Array.isArray(inputs) ? inputs.slice(0, 24) : []
+  const result = []
+  for (const input of files) {
+    const file = safeAttachmentPath(input)
+    const stat = await fs.stat(file)
+    if (!stat.isFile() || stat.size > 20 * 1024 * 1024) throw new Error(uiText('Invalid image attachment.', 'ไฟล์รูปแนบไม่ถูกต้อง'))
+    result.push(file)
+  }
+  return result
+}
+
 function chatHistoryFile() {
-  if (!projectRoot) throw new Error('ยังไม่ได้เปิดโปรเจกต์')
+  if (!projectRoot) throw new Error(uiText('No project is open.', 'ยังไม่ได้เปิดโปรเจกต์'))
   const identity = process.platform === 'win32' ? projectRoot.toLowerCase() : projectRoot
   const key = createHash('sha256').update(identity).digest('hex')
   const directory = path.join(app.getPath('userData'), 'chat-history')
@@ -260,7 +490,7 @@ function chatHistoryFile() {
 }
 
 function projectStorageKey() {
-  if (!projectRoot) throw new Error('ยังไม่ได้เปิดโปรเจกต์')
+  if (!projectRoot) throw new Error(uiText('No project is open.', 'ยังไม่ได้เปิดโปรเจกต์'))
   const identity = process.platform === 'win32' ? projectRoot.toLowerCase() : projectRoot
   return createHash('sha256').update(identity).digest('hex')
 }
@@ -272,7 +502,7 @@ function undoDirectory() {
 }
 
 async function collectProjectFiles(directory = projectRoot, depth = 0, result = []) {
-  if (depth > 20) throw new Error('โครงสร้างโฟลเดอร์ลึกเกินไปสำหรับระบบย้อนกลับ')
+  if (depth > 20) throw new Error(uiText('The project tree is too deep for undo snapshots.', 'โครงสร้างโฟลเดอร์ลึกเกินไปสำหรับระบบย้อนกลับ'))
   const entries = await fs.readdir(directory, { withFileTypes: true })
   for (const entry of entries) {
     if (entry.isSymbolicLink()) continue
@@ -286,13 +516,13 @@ async function collectProjectFiles(directory = projectRoot, depth = 0, result = 
 
 async function createUndoSnapshot(label = '') {
   const files = await collectProjectFiles()
-  if (files.length > 10000) throw new Error('โปรเจกต์มีไฟล์มากเกินไปสำหรับระบบย้อนกลับ')
+  if (files.length > 10000) throw new Error(uiText('The project has too many files for an undo snapshot.', 'โปรเจกต์มีไฟล์มากเกินไปสำหรับระบบย้อนกลับ'))
   let totalSize = 0
   for (const file of files) {
     const stat = await fs.stat(file.fullPath)
     totalSize += stat.size
   }
-  if (totalSize > 250 * 1024 * 1024) throw new Error('โปรเจกต์มีขนาดเกิน 250 MB ไม่สามารถสร้างจุดย้อนกลับได้')
+  if (totalSize > 250 * 1024 * 1024) throw new Error(uiText('The project exceeds the 250 MB undo snapshot limit.', 'โปรเจกต์มีขนาดเกิน 250 MB ไม่สามารถสร้างจุดย้อนกลับได้'))
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
   const directory = path.join(undoDirectory(), id)
   const backupRoot = path.join(directory, 'files')
@@ -322,7 +552,7 @@ async function listUndoSnapshots() {
 }
 
 async function restoreUndoSnapshot(id) {
-  if (!/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new Error('จุดย้อนกลับไม่ถูกต้อง')
+  if (!/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new Error(uiText('Invalid undo snapshot.', 'จุดย้อนกลับไม่ถูกต้อง'))
   const directory = path.join(undoDirectory(), id)
   const backupRoot = path.join(directory, 'files')
   const manifest = JSON.parse(await fs.readFile(path.join(directory, 'manifest.json'), 'utf8'))
@@ -348,7 +578,8 @@ function normalizeConversation(payload = {}, id = payload.conversationId || rand
   }) : []
   const sessionId = typeof payload.sessionId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(payload.sessionId) ? payload.sessionId : null
   const firstMessage = events.find(event => event.kind === 'user')?.text.trim()
-  const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 60) : firstMessage?.slice(0, 60) || 'แชทใหม่'
+  const storedTitle = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 60) : ''
+  const title = storedTitle === 'แชทใหม่' && currentAppSettings.language !== 'th' ? 'New chat' : storedTitle || firstMessage?.slice(0, 60) || uiText('New chat', 'แชทใหม่')
   const updatedAt = typeof payload.updatedAt === 'string' ? payload.updatedAt : new Date().toISOString()
   return { conversationId: id, title, sessionId, events, updatedAt }
 }
@@ -443,7 +674,7 @@ function codexRuntime() {
     ]
     const executable = candidates.find(existsSync)
     if (executable) return { file: executable, prefix: [], env: runtimeEnv }
-    throw new Error('ไม่พบ Codex runtime กรุณาติดตั้ง CodexDesk ใหม่')
+    throw new Error(uiText('Codex runtime was not found. Reinstall CodexDesk.', 'ไม่พบ Codex runtime กรุณาติดตั้ง CodexDesk ใหม่'))
   }
   return {
     file: process.execPath,
@@ -474,7 +705,7 @@ function runCodex(args, cwd, onData) {
 
 function validateMcpName(value) {
   const name = String(value || '').trim()
-  if (!/^[a-zA-Z0-9_-]{1,40}$/.test(name)) throw new Error('ชื่อปลั๊กอินใช้ได้เฉพาะตัวอักษร ตัวเลข ขีดกลาง และขีดล่าง')
+  if (!/^[a-zA-Z0-9_-]{1,40}$/.test(name)) throw new Error(uiText('Plugin names may contain only letters, numbers, hyphens, and underscores.', 'ชื่อปลั๊กอินใช้ได้เฉพาะตัวอักษร ตัวเลข ขีดกลาง และขีดล่าง'))
   return name
 }
 
@@ -482,7 +713,7 @@ function parseMcpList(output) {
   const text = cleanProcessText(output)
   const start = text.indexOf('[')
   const end = text.lastIndexOf(']')
-  if (start < 0 || end < start) throw new Error('อ่านรายการปลั๊กอินไม่สำเร็จ')
+  if (start < 0 || end < start) throw new Error(uiText('Could not read the plugin list.', 'อ่านรายการปลั๊กอินไม่สำเร็จ'))
   return JSON.parse(text.slice(start, end + 1))
 }
 
@@ -494,14 +725,14 @@ async function listMcpServers() {
 
 async function setMcpSetting(input, key, value) {
   const name = validateMcpName(input)
-  if (!['enabled', 'default_tools_approval_mode'].includes(key)) throw new Error('การตั้งค่า MCP ไม่ถูกต้อง')
+  if (!['enabled', 'default_tools_approval_mode'].includes(key)) throw new Error(uiText('Invalid MCP setting.', 'การตั้งค่า MCP ไม่ถูกต้อง'))
   const configFile = path.join(app.getPath('userData'), 'codex-home', 'config.toml')
   const source = await fs.readFile(configFile, 'utf8')
   const lines = source.split(/\r?\n/)
   const header = `[mcp_servers.${name}]`
   const quotedHeader = `[mcp_servers."${name}"]`
   const start = lines.findIndex(line => [header, quotedHeader].includes(line.trim()))
-  if (start < 0) throw new Error('ไม่พบปลั๊กอินนี้')
+  if (start < 0) throw new Error(uiText('Plugin not found.', 'ไม่พบปลั๊กอินนี้'))
   let end = lines.findIndex((line, index) => index > start && /^\s*\[/.test(line))
   if (end < 0) end = lines.length
   const settingPattern = new RegExp(`^\\s*${key}\\s*=`)
@@ -534,6 +765,7 @@ ipcMain.handle('project:open', async () => {
   if (result.canceled) return null
   projectRoot = path.resolve(result.filePaths[0])
   startProjectWatcher()
+  updateDiscordActivity('ready')
   return { path: projectRoot, name: path.basename(projectRoot) }
 })
 ipcMain.handle('project:create-workspace', async () => {
@@ -541,6 +773,7 @@ ipcMain.handle('project:create-workspace', async () => {
   projectRoot = path.join(documents, 'CodexDesk Workspace')
   await fs.mkdir(projectRoot, { recursive: true })
   startProjectWatcher()
+  updateDiscordActivity('ready')
   return { path: projectRoot, name: path.basename(projectRoot), automatic: true }
 })
 
@@ -549,7 +782,7 @@ ipcMain.handle('app:version', () => app.getVersion())
 ipcMain.handle('settings:get', () => readAppSettings())
 ipcMain.handle('settings:save', (_, input) => saveAppSettings(input))
 ipcMain.handle('settings:clear-local-data', async () => {
-  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   await Promise.all([
     fs.rm(path.join(app.getPath('userData'), 'chat-history'), { recursive: true, force: true }),
     fs.rm(path.join(app.getPath('userData'), 'undo-history'), { recursive: true, force: true })
@@ -558,11 +791,11 @@ ipcMain.handle('settings:clear-local-data', async () => {
   return true
 })
 ipcMain.handle('app:uninstall', async () => {
-  if (!app.isPackaged || process.platform !== 'win32') throw new Error('ถอนการติดตั้งได้เฉพาะแอปที่ติดตั้งบน Windows')
+  if (!app.isPackaged || process.platform !== 'win32') throw new Error(uiText('Uninstall is available only for the installed Windows app.', 'ถอนการติดตั้งได้เฉพาะแอปที่ติดตั้งบน Windows'))
   const directory = path.dirname(process.execPath)
   const entries = await fs.readdir(directory)
   const name = entries.find(value => /^uninstall.*\.exe$/i.test(value)) || entries.find(value => /uninstall/i.test(value) && /\.exe$/i.test(value))
-  if (!name) throw new Error('ไม่พบตัวถอนการติดตั้ง กรุณาใช้ Apps & features ของ Windows')
+  if (!name) throw new Error(uiText('The uninstaller was not found. Use Windows Apps & features.', 'ไม่พบตัวถอนการติดตั้ง กรุณาใช้ Apps & features ของ Windows'))
   const child = spawn(path.join(directory, name), [], { detached: true, stdio: 'ignore', windowsHide: false, shell: false })
   child.unref()
   setTimeout(() => app.quit(), 500)
@@ -572,8 +805,15 @@ ipcMain.handle('files:list', async () => projectRoot ? walk(projectRoot) : [])
 ipcMain.handle('files:read', async (_, input) => {
   const file = safePath(input)
   const stat = await fs.stat(file)
-  if (stat.size > 3 * 1024 * 1024) throw new Error('ไฟล์มีขนาดเกิน 3 MB')
+  if (stat.size > 3 * 1024 * 1024) throw new Error(uiText('Files larger than 3 MB cannot be opened in the editor.', 'ไฟล์มีขนาดเกิน 3 MB'))
   return fs.readFile(file, 'utf8')
+})
+ipcMain.handle('files:resolve-link', (_, input) => resolveProjectFileReference(input))
+ipcMain.handle('attachments:save', (_, input) => saveAttachment(input))
+ipcMain.handle('attachments:remove', async (_, inputs) => {
+  const files = Array.isArray(inputs) ? inputs.slice(0, 32) : []
+  await Promise.all(files.map(input => fs.rm(safeAttachmentPath(input), { force: true }).catch(() => {})))
+  return true
 })
 ipcMain.handle('files:write', async (_, payload) => {
   const file = safePath(payload.path)
@@ -611,7 +851,7 @@ ipcMain.handle('history:new', () => mutateHistory(async () => {
 ipcMain.handle('history:open', (_, id) => mutateHistory(async () => {
   const store = await readHistoryStore()
   const conversation = store.conversations.find(item => item.conversationId === id)
-  if (!conversation) throw new Error('ไม่พบประวัติแชทนี้')
+  if (!conversation) throw new Error(uiText('Chat history not found.', 'ไม่พบประวัติแชทนี้'))
   store.activeId = id
   await writeHistoryStore(store)
   return conversation
@@ -631,9 +871,9 @@ ipcMain.handle('undo:create', async (_, label) => createUndoSnapshot(label))
 ipcMain.handle('undo:list', async () => listUndoSnapshots())
 ipcMain.handle('undo:restore', async (_, id) => restoreUndoSnapshot(id))
 ipcMain.handle('git:diff', async () => {
-  if (!projectRoot) throw new Error('ยังไม่ได้เปิดโปรเจกต์')
+  if (!projectRoot) throw new Error(uiText('No project is open.', 'ยังไม่ได้เปิดโปรเจกต์'))
   const check = await run('git', ['rev-parse', '--is-inside-work-tree'], projectRoot)
-  if (check.code !== 0) return { code: 0, output: 'โฟลเดอร์นี้ยังไม่ได้ใช้ Git' }
+  if (check.code !== 0) return { code: 0, output: uiText('This folder is not a Git repository.', 'โฟลเดอร์นี้ยังไม่ได้ใช้ Git') }
   return run('git', ['diff', '--no-ext-diff', '--no-color'], projectRoot)
 })
 ipcMain.handle('auth:status', async () => {
@@ -645,7 +885,7 @@ ipcMain.handle('auth:status', async () => {
   }
 })
 ipcMain.handle('auth:start', async (_, mode = 'browser') => {
-  if (!['browser', 'device'].includes(mode)) throw new Error('รูปแบบการเข้าสู่ระบบไม่ถูกต้อง')
+  if (!['browser', 'device'].includes(mode)) throw new Error(uiText('Invalid sign-in mode.', 'รูปแบบการเข้าสู่ระบบไม่ถูกต้อง'))
   if (authProcess && !authProcess.killed) stopProcess(authProcess)
   const runtime = codexRuntime()
   const loginArgs = mode === 'device' ? ['login', '--device-auth'] : ['login']
@@ -675,28 +915,28 @@ ipcMain.handle('auth:start', async (_, mode = 'browser') => {
   return true
 })
 ipcMain.handle('auth:logout', async () => {
-  if (codexProcess && !codexProcess.killed) throw new Error('กรุณาหยุดงาน Codex ก่อนออกจากระบบ')
+  if (codexProcess && !codexProcess.killed) throw new Error(uiText('Stop Codex before signing out.', 'กรุณาหยุดงาน Codex ก่อนออกจากระบบ'))
   const result = await runCodex(['logout'], app.getPath('home'))
   if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
   return true
 })
 ipcMain.handle('mcp:list', () => listMcpServers())
 ipcMain.handle('mcp:add', async (_, payload = {}) => {
-  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   const name = validateMcpName(payload.name)
   const args = ['mcp', 'add', name]
   if (payload.transport === 'http') {
     const url = new URL(String(payload.url || ''))
-    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('URL ต้องเป็น http หรือ https')
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error(uiText('The URL must use HTTP or HTTPS.', 'URL ต้องเป็น http หรือ https'))
     args.push('--url', url.toString())
   } else if (payload.transport === 'stdio') {
     const command = String(payload.command || '').trim()
-    if (!command || command.length > 260 || /[\r\n\0]/.test(command)) throw new Error('คำสั่ง MCP ไม่ถูกต้อง')
+    if (!command || command.length > 260 || /[\r\n\0]/.test(command)) throw new Error(uiText('Invalid MCP command.', 'คำสั่ง MCP ไม่ถูกต้อง'))
     const commandArgs = Array.isArray(payload.args) ? payload.args.map(value => String(value).trim()).filter(Boolean) : []
-    if (commandArgs.length > 30 || commandArgs.some(value => value.length > 500 || /[\r\n\0]/.test(value))) throw new Error('อาร์กิวเมนต์ MCP ไม่ถูกต้อง')
+    if (commandArgs.length > 30 || commandArgs.some(value => value.length > 500 || /[\r\n\0]/.test(value))) throw new Error(uiText('Invalid MCP arguments.', 'อาร์กิวเมนต์ MCP ไม่ถูกต้อง'))
     args.push('--', command, ...commandArgs)
   } else {
-    throw new Error('ประเภท MCP ไม่ถูกต้อง')
+    throw new Error(uiText('Invalid MCP transport.', 'ประเภท MCP ไม่ถูกต้อง'))
   }
   const result = await runCodex(args, app.getPath('home'))
   if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
@@ -704,18 +944,18 @@ ipcMain.handle('mcp:add', async (_, payload = {}) => {
   return listMcpServers()
 })
 ipcMain.handle('mcp:remove', async (_, input) => {
-  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   const result = await runCodex(['mcp', 'remove', validateMcpName(input)], app.getPath('home'))
   if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
   return listMcpServers()
 })
 ipcMain.handle('mcp:toggle', async (_, payload) => {
-  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   await setMcpSetting(payload?.name, 'enabled', String(Boolean(payload?.enabled)))
   return listMcpServers()
 })
 ipcMain.handle('mcp:login', async (_, input) => {
-  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   const name = validateMcpName(input)
   const opened = new Set()
   const result = await runCodex(['mcp', 'login', name], app.getPath('home'), data => {
@@ -733,7 +973,7 @@ ipcMain.handle('mcp:login', async (_, input) => {
   return listMcpServers()
 })
 ipcMain.handle('mcp:logout', async (_, input) => {
-  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   const result = await runCodex(['mcp', 'logout', validateMcpName(input)], app.getPath('home'))
   if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
   return listMcpServers()
@@ -741,13 +981,13 @@ ipcMain.handle('mcp:logout', async (_, input) => {
 ipcMain.handle('app:open-external', async (_, input) => {
   const url = new URL(input)
   const allowed = url.protocol === 'https:' && (url.hostname === 'chatgpt.com' || url.hostname.endsWith('.openai.com'))
-  if (!allowed) throw new Error('ไม่อนุญาตให้เปิดลิงก์นี้')
+  if (!allowed) throw new Error(uiText('This link is not allowed.', 'ไม่อนุญาตให้เปิดลิงก์นี้'))
   await shell.openExternal(url.toString())
   return true
 })
 ipcMain.handle('app:open-link', async (_, input) => {
   const url = new URL(input)
-  if (url.protocol !== 'https:') throw new Error('เปิดได้เฉพาะลิงก์ HTTPS')
+  if (url.protocol !== 'https:') throw new Error(uiText('Only HTTPS links can be opened.', 'เปิดได้เฉพาะลิงก์ HTTPS'))
   await shell.openExternal(url.toString())
   return true
 })
@@ -771,41 +1011,55 @@ ipcMain.handle('update:install', () => {
   return true
 })
 ipcMain.handle('codex:run', async (_, options) => {
-  if (!projectRoot) throw new Error('ยังไม่ได้เปิดโปรเจกต์')
-  if (codexProcess && !codexProcess.killed) throw new Error('Codex กำลังทำงานอยู่')
+  if (!projectRoot) throw new Error(uiText('No project is open.', 'ยังไม่ได้เปิดโปรเจกต์'))
+  if (codexProcess && !codexProcess.killed) throw new Error(uiText('Codex is already working.', 'Codex กำลังทำงานอยู่'))
   const runtime = codexRuntime()
   const settings = await readAppSettings()
+  const attachments = await validateTaskAttachments(options.attachments)
   codexStopRequested = false
   const accessArgs = options.allowEdit
     ? ['--sandbox', 'danger-full-access', '--ask-for-approval', 'never']
     : ['--sandbox', 'read-only', '--ask-for-approval', 'never']
   const modeInstruction = options.allowEdit
-    ? 'แก้ไขได้เฉพาะไฟล์ภายในโฟลเดอร์โปรเจกต์ปัจจุบัน เครื่องมือ MCP ใช้ได้ตามงานที่ผู้ใช้อนุมัติ ห้ามเข้าถึงข้อมูลอื่นที่ไม่เกี่ยวข้อง'
-    : 'อ่านและวิเคราะห์เท่านั้น ห้ามแก้ไข สร้าง หรือลบไฟล์ และห้ามใช้เครื่องมือ MCP ที่สร้าง แก้ไข หรือลบข้อมูลภายนอก'
+    ? 'Edit only files inside the current project folder. Use MCP tools only as needed for the authorized task. Do not access unrelated data.'
+    : 'Read and analyze only. Do not edit, create, or delete files. Do not use MCP tools that create, edit, or delete external data.'
   const prompt = [
     'Environment: Windows Server 2019.',
     'Do not use powershell.exe or PowerShell commands. Run executables directly, such as rg.exe and git.exe.',
     'Do not run Git commands unless a .git directory exists.',
     'Do not expose internal tool logs in the final response.',
+    attachments.length ? 'The attached images may include still images or representative frames sampled from an attached video. Inspect all of them before answering.' : '',
     modeInstruction,
     settings.webSearch === 'disabled' ? 'Do not use web search.' : settings.webSearch === 'live' ? 'Use live web search whenever current information would improve accuracy.' : 'Use cached web search whenever external information would improve accuracy.',
     settings.customInstructions ? `Personal instructions from the user:\n${settings.customInstructions}` : '',
+    'Always detect the language of the current user request and answer in that same language. If the request mixes languages, use the dominant language. This rule overrides any saved response-language preference. The application UI language must not affect the reply language.',
     '',
-    'คำสั่งจากผู้ใช้:',
+    'User request:',
     options.prompt
   ].join('\n')
   const sessionId = typeof options.sessionId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(options.sessionId) ? options.sessionId : null
   const execArgs = ['exec', '--json', '--skip-git-repo-check']
-  if (sessionId) execArgs.push('resume', sessionId, prompt)
-  else execArgs.push(prompt)
+  if (sessionId) {
+    execArgs.push('resume')
+    for (const file of attachments) execArgs.push('--image', file)
+    execArgs.push(sessionId, prompt)
+  } else {
+    for (const file of attachments) execArgs.push('--image', file)
+    execArgs.push(prompt)
+  }
   const args = [...runtime.prefix, ...accessArgs, ...execArgs]
+  discordOutputBuffer = ''
+  updateDiscordActivity('thinking')
   codexProcess = spawn(runtime.file, args, { cwd: projectRoot, windowsHide: true, shell: false, env: runtime.env, stdio: ['ignore', 'pipe', 'pipe'] })
   const send = (type, data) => mainWindow?.webContents.send('codex:event', { type, data })
   const cleanOutput = chunk => cleanProcessText(chunk).replace(/Reading additional input from stdin\.\.\.\r?\n?/g, '')
   let diagnostics = ''
   codexProcess.stdout.on('data', chunk => {
     const text = cleanOutput(chunk)
-    if (text) send('stdout', text)
+    if (text) {
+      updateDiscordFromCodexOutput(text)
+      send('stdout', text)
+    }
   })
   codexProcess.stderr.on('data', chunk => {
     diagnostics = (diagnostics + cleanOutput(chunk)).slice(-12000)
@@ -814,16 +1068,18 @@ ipcMain.handle('codex:run', async (_, options) => {
     codexProcess.on('error', error => {
       send('error', error.message)
       codexProcess = null
+      updateDiscordActivity('ready')
       resolve({ code: -1 })
     })
     codexProcess.on('close', code => {
       if (code !== 0 && !codexStopRequested) send('error', explainCodexFailure(diagnostics))
       send('done', String(code ?? -1))
       if (code === 0 && settings.notifications && Notification.isSupported() && !mainWindow?.isFocused()) {
-        new Notification({ title: 'CodexDesk', body: 'Codex ทำงานเสร็จแล้ว' }).show()
+        new Notification({ title: 'CodexDesk', body: uiText('Codex finished the task.', 'Codex ทำงานเสร็จแล้ว') }).show()
       }
       codexProcess = null
       codexStopRequested = false
+      updateDiscordActivity('ready')
       resolve({ code })
     })
   })
@@ -833,20 +1089,36 @@ ipcMain.handle('codex:stop', () => {
   return stopProcess(codexProcess)
 })
 
+if (!app.requestSingleInstanceLock()) {
+  isQuitting = true
+  app.quit()
+} else {
+  app.on('second-instance', showMainWindow)
+}
+
 app.whenReady().then(() => {
   createWindow()
+  createTray()
   setupAutoUpdater()
-  readAppSettings().then(applyPowerSetting).catch(() => {})
+  fs.rm(attachmentDirectory(), { recursive: true, force: true }).catch(() => {})
+  readAppSettings().then(settings => {
+    applyPowerSetting(settings)
+    return applyDiscordPresence(settings)
+  }).catch(() => {})
 })
 app.on('before-quit', () => {
+  isQuitting = true
   stopProjectWatcher()
   stopProcess(codexProcess)
   stopProcess(authProcess)
+  void stopDiscordPresence()
+  tray?.destroy()
+  tray = undefined
   if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) powerSaveBlocker.stop(powerSaveBlockerId)
 })
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  if (isQuitting && process.platform !== 'darwin') app.quit()
 })
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  showMainWindow()
 })
