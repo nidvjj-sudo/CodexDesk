@@ -130,6 +130,24 @@ function MarkdownMessage({ onOpenFile, text }) {
   >{text}</ReactMarkdown>
 }
 
+function extractResponseArtifact(events) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event.kind === 'user' || event.kind === 'system' || !event.text) continue
+    const blocks = [...event.text.matchAll(/```([^\n`]*)\n([\s\S]*?)```/g)]
+    if (!blocks.length) continue
+    const block = blocks.at(-1)
+    const language = block[1].trim().toLowerCase() || 'text'
+    return {
+      id: `${event.id || index}-${blocks.length}`,
+      content: block[2].replace(/\n$/, ''),
+      language,
+      type: ['text', 'txt', 'markdown', 'md'].includes(language) ? 'text' : 'code'
+    }
+  }
+  return null
+}
+
 function waitForMedia(element, eventName) {
   return new Promise((resolve, reject) => {
     const done = () => { cleanup(); resolve() }
@@ -252,6 +270,7 @@ function App() {
   const [conversationId, setConversationId] = useState(null)
   const [conversations, setConversations] = useState([])
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [artifactView, setArtifactView] = useState(null)
   const [mcpOpen, setMcpOpen] = useState(false)
   const [mcpServers, setMcpServers] = useState([])
   const [mcpBusy, setMcpBusy] = useState(false)
@@ -277,6 +296,8 @@ function App() {
   const editorRef = useRef(null)
   const pendingEditorLocation = useRef(null)
   const attachmentInput = useRef(null)
+  const artifactEvent = useRef(null)
+  const openedChange = useRef(null)
 
   const t = (english, thai) => settings.language === 'th' ? thai : english
   const dirty = currentFile && content !== savedContent
@@ -286,6 +307,29 @@ function App() {
   const currentTaskActivity = currentTaskIndex >= 0 ? activity.slice(currentTaskIndex) : activity
   const liveStats = currentTaskActivity.reduce((total, item) => ({ additions: total.additions + (item.additions || 0), deletions: total.deletions + (item.deletions || 0) }), { additions: 0, deletions: 0 })
   const visibleFiles = useMemo(() => filterFileTree(files, fileQuery), [files, fileQuery])
+  const responseArtifact = useMemo(() => extractResponseArtifact(events), [events])
+
+  useEffect(() => {
+    if (!responseArtifact || responseArtifact.id === artifactEvent.current) return
+    artifactEvent.current = responseArtifact.id
+    setArtifactView('response')
+  }, [responseArtifact?.id])
+
+  useEffect(() => {
+    if (running || dirty || !project) return
+    const item = activity.slice().reverse().find(entry => entry.changes?.some(change => change.path))
+    const change = item?.changes?.find(entry => entry.path)
+    const key = change ? `${item.id}:${change.path}` : null
+    if (!key || key === openedChange.current) return
+    openedChange.current = key
+    api.resolveFileLink(change.path).then(async target => {
+      const text = await api.readFile(target.path)
+      setCurrentFile({ path: target.path, name: target.name })
+      setContent(text)
+      setSavedContent(text)
+      setArtifactView('file')
+    }).catch(() => {})
+  }, [running, activity, project?.path])
 
   useEffect(() => {
     api.getVersion().then(setCurrentVersion)
@@ -566,6 +610,7 @@ function App() {
       setQueue([])
       setActivity([])
       await loadProject(value)
+      setArtifactView('files')
     } else {
       setHistoryReady(true)
     }
@@ -595,6 +640,7 @@ function App() {
       setContent(text)
       setSavedContent(text)
       setMobileView('editor')
+      setArtifactView('file')
     } catch (error) {
       alert(error.message)
     }
@@ -639,6 +685,7 @@ function App() {
   async function loadDiff() {
     const result = await api.gitDiff()
     setDiff(result.output || t('No changes', 'ไม่มีการเปลี่ยนแปลง'))
+    setArtifactView('diff')
   }
 
   function parseCodexOutput(raw, flush = false) {
@@ -817,10 +864,12 @@ function App() {
     }
     if (command === '/files') {
       setMobileView('files')
+      setArtifactView('files')
       return
     }
     if (command === '/code') {
       setMobileView('editor')
+      setArtifactView(currentFile ? 'file' : 'files')
       return
     }
     if (command === '/activity') {
@@ -922,7 +971,8 @@ function App() {
   }
 
   async function newChat() {
-    if (running || !project) return
+    if (running) return
+    if (!project) await ensureWorkspace()
     setHistoryReady(false)
     await api.historySave({ conversationId, events, sessionId }).catch(() => {})
     const history = await api.historyNew()
@@ -1026,39 +1076,31 @@ function App() {
       </div>
     </header>
 
-    <main className={`workspace view-${mobileView}`}>
-      <aside className="rail">
-        <button className={`rail-button ${mobileView === 'files' ? 'active' : ''}`} onClick={() => setMobileView('files')} title={t('Files', 'ไฟล์')}><FolderOpen size={17} /><span>{t('Files', 'ไฟล์')}</span></button>
-        <button className={`rail-button ${mobileView === 'editor' ? 'active' : ''}`} onClick={() => setMobileView('editor')} title={t('Code editor', 'ตัวแก้ไขโค้ด')}><Code2 size={17} /><span>{t('Code', 'โค้ด')}</span></button>
-        <button className={`rail-button ${mobileView === 'chat' ? 'active' : ''}`} onClick={() => setMobileView('chat')} title="Codex"><Bot size={17} /><span>Codex</span></button>
-        <button className="rail-button" onClick={() => { setMobileView('editor'); loadDiff() }} title="Git Diff"><GitCompare size={17} /><span>Diff</span></button>
-        <button className="rail-button" onClick={openMcp} title={t('MCP plugins', 'ปลั๊กอิน MCP')}><Plug size={17} /><span>{t('Plugins', 'ปลั๊กอิน')}</span></button>
-        <div className="rail-spacer" />
-        <button className="rail-button" onClick={() => openSettings()} title={t('Settings', 'การตั้งค่า')}><SettingsIcon size={17} /><span>{t('Settings', 'ตั้งค่า')}</span></button>
-        <button className={`rail-button ${authenticated ? 'signed-in' : ''}`} onClick={openAccount} title={authenticated ? t('ChatGPT account', 'บัญชี ChatGPT') : t('Sign in to ChatGPT', 'เข้าสู่ระบบ ChatGPT')}>{authenticated ? <Check size={17} /> : <LogIn size={17} />}<span>{t('Account', 'บัญชี')}</span></button>
+    <main className={`workspace view-${mobileView} ${artifactView ? 'artifact-open' : ''}`}>
+      <aside className="chat-sidebar">
+        <div className="sidebar-logo"><span><Code2 size={16} /></span><strong>CodexDesk</strong></div>
+        <button className="sidebar-new" onClick={newChat} disabled={running}><FilePenLine size={16} /><span>{t('New chat', 'แชทใหม่')}</span><Plus size={14} /></button>
+        <nav className="sidebar-nav">
+          <button className="active" onClick={() => setMobileView('chat')}><Bot size={16} /><span>Codex</span></button>
+          <button onClick={() => { setArtifactView('files'); setMobileView('files') }}><FolderOpen size={16} /><span>{t('Files', 'ไฟล์')}</span></button>
+          <button onClick={() => void loadDiff()}><GitCompare size={16} /><span>{t('Changes', 'การเปลี่ยนแปลง')}</span></button>
+          <button onClick={openMcp}><Plug size={16} /><span>{t('Plugins', 'ปลั๊กอิน')}</span></button>
+        </nav>
+        <div className="sidebar-recents"><div className="sidebar-section-title"><span>{t('Recents', 'ล่าสุด')}</span><Search size={13} /></div><div className="sidebar-history">{conversations.map(item => <div className={`sidebar-history-item ${item.conversationId === conversationId ? 'active' : ''}`} key={item.conversationId}><button onClick={() => openConversation(item.conversationId)} disabled={running}><span>{item.title}</span></button><button onClick={() => deleteConversation(item.conversationId)} disabled={running} title={t('Delete chat', 'ลบแชท')}><Trash2 size={12} /></button></div>)}{conversations.length === 0 && <div className="sidebar-empty">{t('No chats yet', 'ยังไม่มีแชท')}</div>}</div></div>
+        <div className="sidebar-footer">
+          <button onClick={openProject}><FolderOpen size={16} /><span><strong>{project?.name || t('Open project', 'เปิดโปรเจกต์')}</strong><small>{t('Choose workspace', 'เลือกพื้นที่ทำงาน')}</small></span><ChevronRight size={14} /></button>
+          <button onClick={() => openSettings()}><SettingsIcon size={16} /><span>{t('Settings', 'การตั้งค่า')}</span></button>
+          <button onClick={openAccount}>{authenticated ? <Check size={16} /> : <LogIn size={16} />}<span>{authenticated ? t('ChatGPT connected', 'เชื่อมต่อ ChatGPT แล้ว') : t('Connect ChatGPT', 'เชื่อมต่อ ChatGPT')}</span></button>
+        </div>
       </aside>
 
-      <aside className="explorer">
-        <div className="panel-heading"><div><span>PROJECT FILES</span><small>{project ? 'LOCAL' : 'EMPTY'}</small></div><button onClick={refreshFiles}><RefreshCw size={14} /></button></div>
-        <div className="project-label"><FolderOpen size={13} /><span>{project?.name || t('No project open', 'ยังไม่ได้เปิดโปรเจกต์')}</span></div>
-        <label className="file-search"><Search size={13} /><input value={fileQuery} onChange={event => setFileQuery(event.target.value)} placeholder={t('Search files', 'ค้นหาไฟล์')} /></label>
-        <div className="file-tree">{visibleFiles.map(node => <FileNode key={node.path} node={node} onOpen={openFile} />)}{visibleFiles.length === 0 && fileQuery && <div className="file-empty">{t('No files found', 'ไม่พบไฟล์')}</div>}</div>
+      <aside className={`artifact-panel ${artifactView ? 'open' : ''}`}>
+        <div className="artifact-heading"><div className="artifact-tabs"><button className={artifactView === 'files' ? 'active' : ''} onClick={() => setArtifactView('files')}><FolderOpen size={13} />{t('Files', 'ไฟล์')}</button>{currentFile && <button className={artifactView === 'file' ? 'active' : ''} onClick={() => setArtifactView('file')}><Code2 size={13} />{currentFile.name}</button>}<button className={artifactView === 'diff' ? 'active' : ''} onClick={() => void loadDiff()}><GitCompare size={13} />{t('Changes', 'การเปลี่ยนแปลง')}</button>{responseArtifact && <button className={artifactView === 'response' ? 'active' : ''} onClick={() => setArtifactView('response')}>{responseArtifact.type === 'code' ? <Code2 size={13} /> : <File size={13} />}{responseArtifact.type === 'code' ? 'Code' : 'Text'}</button>}</div><button className="artifact-close" onClick={() => setArtifactView(null)} title={t('Close panel', 'ปิดแผง')}><X size={15} /></button></div>
+        {artifactView === 'files' && <div className="artifact-files"><div className="project-label"><FolderOpen size={13} /><span>{project?.name || t('No project open', 'ยังไม่ได้เปิดโปรเจกต์')}</span><button onClick={refreshFiles}><RefreshCw size={13} /></button></div><label className="file-search"><Search size={13} /><input value={fileQuery} onChange={event => setFileQuery(event.target.value)} placeholder={t('Search files', 'ค้นหาไฟล์')} /></label><div className="file-tree">{visibleFiles.map(node => <FileNode key={node.path} node={node} onOpen={openFile} />)}{visibleFiles.length === 0 && <div className="file-empty">{project ? t('No files found', 'ไม่พบไฟล์') : t('Open a project to browse files', 'เปิดโปรเจกต์เพื่อดูไฟล์')}</div>}</div></div>}
+        {artifactView === 'file' && currentFile && <div className="artifact-editor"><div className="artifact-toolbar"><span><File size={13} />{currentFile.name}</span><button disabled={!dirty} onClick={saveFile}><Save size={13} />{t('Save', 'บันทึก')}</button></div><div className="editor-wrap"><Editor value={content} onChange={value => setContent(value ?? '')} onMount={mountEditor} language={language} theme="vs-dark" options={{ minimap: { enabled: true }, fontFamily: 'Cascadia Mono, Consolas, monospace', fontSize: 13, padding: { top: 16 }, smoothScrolling: true, cursorSmoothCaretAnimation: 'on', renderLineHighlight: 'all', wordWrap: 'off', automaticLayout: true }} /></div><div className="editor-status"><span>{language.toUpperCase()}</span><span>{dirty ? t('Unsaved', 'ยังไม่ได้บันทึก') : t('Saved', 'บันทึกแล้ว')}</span><span>UTF-8</span></div></div>}
+        {artifactView === 'diff' && <div className="artifact-diff"><div className="artifact-toolbar"><span><GitCompare size={13} />Git Diff</span><button onClick={loadDiff}><RefreshCw size={13} />{t('Refresh', 'รีเฟรช')}</button></div><pre>{diff || t('Codex changes will appear here', 'การเปลี่ยนแปลงของ Codex จะแสดงที่นี่')}</pre></div>}
+        {artifactView === 'response' && responseArtifact && <div className="response-artifact"><div className="artifact-toolbar"><span>{responseArtifact.type === 'code' ? <Code2 size={13} /> : <File size={13} />}{responseArtifact.language.toUpperCase()}</span><button onClick={() => api.copyText(responseArtifact.content)}><Copy size={13} />{t('Copy', 'คัดลอก')}</button></div><pre><code>{responseArtifact.content}</code></pre></div>}
       </aside>
-
-      <section className="editor-area">
-        <div className="editor-tabs">
-          {currentFile ? <div className="editor-tab active"><File size={13} /><span>{project?.name}</span><ChevronRight size={11} /><strong>{currentFile.name}</strong>{dirty && <i />}</div> : <div className="empty-tab"><Code2 size={13} />{t('Code editor', 'พื้นที่แก้ไขโค้ด')}</div>}
-          <button className="save-button" disabled={!dirty} onClick={saveFile}><Save size={14} />{t('Save', 'บันทึก')}</button>
-        </div>
-        <div className="editor-wrap">
-          <Editor value={content} onChange={value => setContent(value ?? '')} onMount={mountEditor} language={language} theme="vs-dark" options={{ minimap: { enabled: true }, fontFamily: 'Cascadia Mono, Consolas, monospace', fontSize: 14, padding: { top: 16 }, smoothScrolling: true, cursorSmoothCaretAnimation: 'on', renderLineHighlight: 'all', wordWrap: 'off', automaticLayout: true }} />
-        </div>
-        <div className="bottom-panel">
-          <div className="diff-heading"><GitCompare size={14} /><span>Git Diff</span><button onClick={loadDiff}><RefreshCw size={13} />{t('Refresh', 'รีเฟรช')}</button></div>
-          <pre className="diff-view">{diff || t('Codex changes will appear here', 'การเปลี่ยนแปลงของ Codex จะแสดงที่นี่')}</pre>
-        </div>
-        <div className="editor-status"><span>{currentFile ? language.toUpperCase() : 'NO FILE'}</span><span>{dirty ? t('Unsaved', 'ยังไม่ได้บันทึก') : t('Saved', 'บันทึกแล้ว')}</span><span>UTF-8</span></div>
-      </section>
 
       <aside className="agent-panel">
         <div className="agent-heading"><div><Bot size={17} /><span>Codex</span></div><div className="agent-actions"><button className="icon-action" disabled={running} onClick={newChat} title={t('New chat', 'แชทใหม่')}><Plus size={14} /></button><button className={`icon-action ${historyOpen ? 'active' : ''}`} onClick={() => { setHistoryOpen(value => !value); setActivityOpen(false) }} title={t('Chat history', 'ประวัติแชท')}><History size={14} /></button><button className="icon-action" disabled={events.length === 0} onClick={copyChat} title={t('Copy full chat', 'คัดลอกแชททั้งหมด')}><Copy size={14} /></button><button className="icon-action" disabled={running || undoStack.length === 0} onClick={undoLastTask} title={t('Undo latest task', 'ย้อนกลับงานล่าสุด')}><Undo2 size={14} /></button><button className={activityOpen ? 'active' : ''} onClick={() => { setActivityOpen(value => !value); setHistoryOpen(false) }} title="Left Ctrl + O"><ListTodo size={15} />{t('Activity', 'กิจกรรม')}{queue.length > 0 && <b>{queue.length}</b>}</button><button disabled={!running} onClick={stopCodex}><CircleStop size={15} />{t('Stop', 'หยุด')}</button></div></div>

@@ -18,6 +18,17 @@ jobs:
         with:
           node-version: "22"
       - run: npm install
+      - name: Ensure release tag
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $tag = "v$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if (-not (git ls-remote --tags origin "refs/tags/$tag")) {
+            git tag $tag
+            git push origin $tag
+          }
       - run: npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
