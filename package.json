@@ -1,6 +1,6 @@
 {
   "name": "codexdesk",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "private": true,
   "description": "Desktop workspace for OpenAI Codex CLI",
   "repository": { "type": "git", "url": "https://github.com/nidvjj-sudo/CodexDesk.git" },
@@ -21,7 +21,9 @@
     "monaco-editor": "^0.52.2",
     "motion": "^11.15.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",

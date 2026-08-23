@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import { motion, AnimatePresence } from 'motion/react'
-import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Copy, Download, ExternalLink, File, Folder, FolderOpen, GitCompare, LogIn, RefreshCw, Save, Send, Settings2, X } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Bot, Check, ChevronDown, ChevronRight, CircleStop, Code2, Copy, Download, ExternalLink, File, Folder, FolderOpen, GitCompare, ListTodo, LogIn, RefreshCw, Save, Send, Settings2, Trash2, X } from 'lucide-react'
 
 const api = window.codexDesk
 
@@ -18,6 +20,15 @@ function FileNode({ node, onOpen, level = 0 }) {
     </div>
   }
   return <button className="tree-row file-row" style={{ paddingLeft: 25 + level * 14 }} onClick={() => onOpen(node)}><File size={13} /><span>{node.name}</span></button>
+}
+
+function MarkdownMessage({ text }) {
+  return <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    components={{
+      a: ({ href, children }) => <button className="markdown-link" onClick={() => href && api.openLink(href)}>{children}</button>
+    }}
+  >{text}</ReactMarkdown>
 }
 
 function App() {
@@ -37,8 +48,17 @@ function App() {
   const [authState, setAuthState] = useState('idle')
   const [authMode, setAuthMode] = useState('browser')
   const [updater, setUpdater] = useState({ status: 'idle', version: null, percent: 0 })
+  const [queue, setQueue] = useState([])
+  const [activity, setActivity] = useState([])
+  const [activityOpen, setActivityOpen] = useState(false)
+  const [sessionId, setSessionId] = useState(null)
+  const [historyReady, setHistoryReady] = useState(false)
   const codexBuffer = useRef('')
   const conversationEnd = useRef(null)
+  const runningRef = useRef(false)
+  const queueRef = useRef([])
+  const leftCtrlPressed = useRef(false)
+  const sessionIdRef = useRef(null)
 
   const dirty = currentFile && content !== savedContent
 
@@ -54,11 +74,32 @@ function App() {
   useEffect(() => api.onCodexEvent(event => {
     if (event.type === 'done') {
       parseCodexOutput('', true)
-      setRunning(false)
     }
     if (event.type === 'stdout') parseCodexOutput(event.data)
     if (event.type === 'stderr' || event.type === 'error') setEvents(items => [...items, { kind: 'error', text: event.data }])
   }), [])
+
+  useEffect(() => {
+    const keyDown = event => {
+      if (event.code === 'ControlLeft') leftCtrlPressed.current = true
+      if (event.code === 'KeyO' && leftCtrlPressed.current) {
+        event.preventDefault()
+        setActivityOpen(value => !value)
+      }
+    }
+    const keyUp = event => {
+      if (event.code === 'ControlLeft') leftCtrlPressed.current = false
+    }
+    const reset = () => { leftCtrlPressed.current = false }
+    window.addEventListener('keydown', keyDown)
+    window.addEventListener('keyup', keyUp)
+    window.addEventListener('blur', reset)
+    return () => {
+      window.removeEventListener('keydown', keyDown)
+      window.removeEventListener('keyup', keyUp)
+      window.removeEventListener('blur', reset)
+    }
+  }, [])
 
   useEffect(() => api.onAuthEvent(event => {
     if (event.type === 'output') setAuthOutput(value => value + event.data)
@@ -77,6 +118,14 @@ function App() {
   useEffect(() => {
     conversationEnd.current?.scrollIntoView({ behavior: running ? 'smooth' : 'auto', block: 'end' })
   }, [events, running])
+
+  useEffect(() => {
+    if (!project || !historyReady) return undefined
+    const timeout = window.setTimeout(() => {
+      api.historySave({ events, sessionId }).catch(() => {})
+    }, 250)
+    return () => window.clearTimeout(timeout)
+  }, [events, sessionId, project, historyReady])
 
   async function startLogin(mode = 'browser') {
     setAuthOpen(true)
@@ -119,17 +168,31 @@ function App() {
   const deviceCode = authOutput.match(/\b[A-Z0-9]{4,6}-[A-Z0-9]{4,6}\b/)?.[0]
 
   async function loadProject(value) {
+    setHistoryReady(false)
     setProject(value)
-    setFiles(await api.listFiles())
+    setEvents([])
+    const [nextFiles, history] = await Promise.all([api.listFiles(), api.historyGet()])
+    setFiles(nextFiles)
+    sessionIdRef.current = history.sessionId || null
+    setSessionId(history.sessionId || null)
+    setEvents((history.events || []).map(event => ({ ...event, queued: false })))
+    setHistoryReady(true)
   }
 
   async function openProject() {
+    if (project && historyReady) await api.historySave({ events, sessionId }).catch(() => {})
+    setHistoryReady(false)
     const value = await api.openProject()
     if (value) {
       setCurrentFile(null)
       setContent('')
       setSavedContent('')
+      queueRef.current = []
+      setQueue([])
+      setActivity([])
       await loadProject(value)
+    } else {
+      setHistoryReady(true)
     }
   }
 
@@ -169,9 +232,14 @@ function App() {
     for (const line of lines.filter(Boolean)) {
       try {
         const event = JSON.parse(line)
+        if (event.type === 'thread.started' && event.thread_id) {
+          sessionIdRef.current = event.thread_id
+          setSessionId(event.thread_id)
+        }
         if (event.type === 'item.completed' && event.item?.type === 'agent_message' && event.item.text) {
           setEvents(items => [...items, { kind: 'agent_message', text: event.item.text }])
         }
+        if (event.item && event.item.type !== 'agent_message') updateActivity(event)
         if (event.type === 'error') {
           setEvents(items => [...items, { kind: 'error', text: event.message || 'Codex ทำงานไม่สำเร็จ' }])
         }
@@ -183,20 +251,73 @@ function App() {
     }
   }
 
-  async function sendPrompt() {
-    const text = prompt.trim()
-    if (!text || running || !project) return
-    setPrompt('')
-    setEvents(items => [...items, { kind: 'user', text }])
+  function updateActivity(event) {
+    const item = event.item
+    const id = item.id || `${item.type}-${Date.now()}`
+    const labels = { reasoning: 'กำลังวิเคราะห์', file_change: 'กำลังแก้ไขไฟล์', command_execution: 'กำลังรันคำสั่ง', web_search: 'กำลังค้นหา', mcp_tool_call: 'กำลังใช้เครื่องมือ' }
+    const title = item.command || item.query || item.name || item.path || labels[item.type] || item.type
+    const output = item.aggregated_output || item.output || item.text || ''
+    const status = event.type === 'item.started' ? 'running' : item.status || 'completed'
+    setActivity(items => {
+      const index = items.findIndex(value => value.id === id)
+      const next = { id, type: item.type, title: String(title), output: String(output).slice(-1200), status }
+      if (index < 0) return [...items.slice(-99), next]
+      return items.map((value, position) => position === index ? { ...value, ...next } : value)
+    })
+  }
+
+  async function executeTask(task) {
+    runningRef.current = true
     setRunning(true)
+    setEvents(items => items.map(event => event.id === task.id ? { ...event, queued: false } : event))
+    setActivity(items => [...items.slice(-99), { id: `task-${task.id}`, type: 'task', title: task.text, output: '', status: 'running' }])
+    let completed = false
     try {
-      await api.codexRun({ prompt: text, allowEdit })
+      const result = await api.codexRun({ prompt: task.text, allowEdit: task.allowEdit, sessionId: sessionIdRef.current })
+      completed = result.code === 0
       await refreshFiles()
       await loadDiff()
     } catch (error) {
-      setRunning(false)
       setEvents(items => [...items, { kind: 'error', text: error.message }])
     }
+    setActivity(items => items.map(item => item.id === `task-${task.id}` ? { ...item, status: completed ? 'completed' : 'failed' } : item))
+    const next = queueRef.current.shift()
+    setQueue([...queueRef.current])
+    if (next) {
+      void executeTask(next)
+    } else {
+      runningRef.current = false
+      setRunning(false)
+    }
+  }
+
+  function sendPrompt() {
+    const text = prompt.trim()
+    if (!text || !project) return
+    const task = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text, allowEdit }
+    setPrompt('')
+    setEvents(items => [...items, { id: task.id, kind: 'user', text, queued: runningRef.current }])
+    if (runningRef.current) {
+      queueRef.current.push(task)
+      setQueue([...queueRef.current])
+      return
+    }
+    void executeTask(task)
+  }
+
+  function stopCodex() {
+    queueRef.current = []
+    setQueue([])
+    api.codexStop()
+  }
+
+  async function clearHistory() {
+    if (!confirm('ลบประวัติแชทของโฟลเดอร์นี้ทั้งหมดหรือไม่')) return
+    await api.historyClear()
+    sessionIdRef.current = null
+    setSessionId(null)
+    setEvents([])
+    setActivity([])
   }
 
   const language = useMemo(() => {
@@ -245,19 +366,25 @@ function App() {
       </section>
 
       <aside className="agent-panel">
-        <div className="agent-heading"><div><Bot size={17} /><span>Codex</span></div><button disabled={!running} onClick={() => api.codexStop()}><CircleStop size={15} />หยุด</button></div>
+        <div className="agent-heading"><div><Bot size={17} /><span>Codex</span></div><div className="agent-actions"><button className={activityOpen ? 'active' : ''} onClick={() => setActivityOpen(value => !value)} title="Ctrl ซ้าย + O"><ListTodo size={15} />กิจกรรม{queue.length > 0 && <b>{queue.length}</b>}</button><button disabled={!running} onClick={stopCodex}><CircleStop size={15} />หยุด</button></div></div>
         <div className="agent-meta"><span>Local workspace</span><span>{allowEdit ? 'Workspace write' : 'Read only'}</span></div>
         <div className="conversation">
           {events.length === 0 && <div className="welcome"><div className="welcome-icon"><Bot size={22} /></div><h2>เริ่มสร้างด้วย Codex</h2><p>บอกสิ่งที่ต้องการแก้ไขในโปรเจกต์นี้</p></div>}
-          {events.map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={index} className={`message ${event.kind}`}><span>{event.kind === 'user' ? 'คุณ' : 'Codex'}</span><p>{event.text}</p></motion.div>)}
+          {events.map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><span>{event.kind === 'user' ? event.queued ? 'คุณ · อยู่ในคิว' : 'คุณ' : 'Codex'}</span><div className="markdown"><MarkdownMessage text={event.text} /></div></motion.div>)}
           {running && <div className="thinking"><i /><i /><i /></div>}
           <div ref={conversationEnd} className="conversation-end" />
         </div>
+        <AnimatePresence>{activityOpen && <motion.div className="activity-drawer" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
+          <div className="activity-heading"><div><ListTodo size={15} /><span>กิจกรรมของ Codex</span></div><div className="activity-heading-actions"><kbd>Ctrl + O</kbd><button onClick={clearHistory} title="ล้างประวัติแชท"><Trash2 size={13} /></button></div></div>
+          {queue.length > 0 && <div className="queue-section"><strong>คิวข้อความ {queue.length}</strong>{queue.map((task, index) => <div className="queue-item" key={task.id}><span>{index + 1}</span><p>{task.text}</p></div>)}</div>}
+          <div className="activity-list">{activity.length === 0 ? <div className="activity-empty">ยังไม่มีกิจกรรม</div> : activity.slice().reverse().map(item => <div className={`activity-item ${item.status}`} key={item.id}><i /><div><strong>{item.title}</strong>{item.output && <pre>{item.output}</pre>}</div></div>)}</div>
+        </motion.div>}</AnimatePresence>
         <div className="composer">
           <textarea value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendPrompt() } }} placeholder={project ? 'สั่งงาน Codex…' : 'เปิดโปรเจกต์ก่อน'} disabled={!project} />
+          {queue.length > 0 && <div className="queue-indicator">มี {queue.length} ข้อความรอทำงาน</div>}
           <div className="composer-footer">
             <button className="permission" onClick={() => setAllowEdit(value => !value)}><span className={allowEdit ? 'enabled' : ''} />{allowEdit ? 'แก้ไขไฟล์ได้' : 'อ่านอย่างเดียว'}</button>
-            <button className="send-button" onClick={sendPrompt} disabled={!prompt.trim() || running || !project}><Send size={15} /></button>
+            <button className="send-button" onClick={sendPrompt} disabled={!prompt.trim() || !project}><Send size={15} /></button>
           </div>
         </div>
       </aside>

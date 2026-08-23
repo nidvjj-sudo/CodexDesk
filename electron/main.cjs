@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
 const { spawn } = require('child_process')
+const { createHash } = require('crypto')
 const { existsSync, mkdirSync } = require('fs')
 const fs = require('fs/promises')
 const path = require('path')
@@ -8,6 +9,7 @@ const { autoUpdater } = require('electron-updater')
 let mainWindow
 let projectRoot
 let codexProcess
+let codexStopRequested = false
 let authProcess
 let updateState = { status: 'idle', version: null, percent: 0 }
 
@@ -75,6 +77,25 @@ function safePath(input) {
   const relative = path.relative(projectRoot, resolved)
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('ไม่อนุญาตให้เข้าถึงไฟล์นอกโปรเจกต์')
   return resolved
+}
+
+function chatHistoryFile() {
+  if (!projectRoot) throw new Error('ยังไม่ได้เปิดโปรเจกต์')
+  const identity = process.platform === 'win32' ? projectRoot.toLowerCase() : projectRoot
+  const key = createHash('sha256').update(identity).digest('hex')
+  const directory = path.join(app.getPath('userData'), 'chat-history')
+  mkdirSync(directory, { recursive: true })
+  return path.join(directory, `${key}.json`)
+}
+
+function normalizeHistory(payload = {}) {
+  const allowedKinds = new Set(['user', 'agent_message', 'output', 'error'])
+  const events = Array.isArray(payload.events) ? payload.events.slice(-300).flatMap(event => {
+    if (!event || !allowedKinds.has(event.kind) || typeof event.text !== 'string') return []
+    return [{ id: typeof event.id === 'string' ? event.id : undefined, kind: event.kind, text: event.text.slice(0, 100000) }]
+  }) : []
+  const sessionId = typeof payload.sessionId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(payload.sessionId) ? payload.sessionId : null
+  return { version: 1, project: projectRoot, sessionId, events, updatedAt: new Date().toISOString() }
 }
 
 async function walk(directory, depth = 0) {
@@ -189,6 +210,26 @@ ipcMain.handle('files:write', async (_, payload) => {
   await fs.writeFile(file, payload.content, 'utf8')
   return true
 })
+ipcMain.handle('history:get', async () => {
+  try {
+    const history = JSON.parse(await fs.readFile(chatHistoryFile(), 'utf8'))
+    return normalizeHistory(history)
+  } catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return normalizeHistory()
+    throw error
+  }
+})
+ipcMain.handle('history:save', async (_, payload) => {
+  const file = chatHistoryFile()
+  const temporary = `${file}.tmp`
+  await fs.writeFile(temporary, JSON.stringify(normalizeHistory(payload), null, 2), 'utf8')
+  await fs.rename(temporary, file)
+  return true
+})
+ipcMain.handle('history:clear', async () => {
+  await fs.rm(chatHistoryFile(), { force: true })
+  return true
+})
 ipcMain.handle('git:diff', async () => {
   if (!projectRoot) throw new Error('ยังไม่ได้เปิดโปรเจกต์')
   const check = await run('git', ['rev-parse', '--is-inside-work-tree'], projectRoot)
@@ -240,6 +281,12 @@ ipcMain.handle('app:open-external', async (_, input) => {
   await shell.openExternal(url.toString())
   return true
 })
+ipcMain.handle('app:open-link', async (_, input) => {
+  const url = new URL(input)
+  if (url.protocol !== 'https:') throw new Error('เปิดได้เฉพาะลิงก์ HTTPS')
+  await shell.openExternal(url.toString())
+  return true
+})
 ipcMain.handle('update:state', () => updateState)
 ipcMain.handle('update:check', async () => {
   if (!app.isPackaged) return publishUpdateState({ status: 'current', version: app.getVersion() })
@@ -259,6 +306,7 @@ ipcMain.handle('codex:run', async (_, options) => {
   if (!projectRoot) throw new Error('ยังไม่ได้เปิดโปรเจกต์')
   if (codexProcess && !codexProcess.killed) throw new Error('Codex กำลังทำงานอยู่')
   const runtime = codexRuntime()
+  codexStopRequested = false
   const accessArgs = options.allowEdit
     ? ['--sandbox', 'danger-full-access', '--ask-for-approval', 'never']
     : ['--sandbox', 'read-only', '--ask-for-approval', 'never']
@@ -275,7 +323,11 @@ ipcMain.handle('codex:run', async (_, options) => {
     'คำสั่งจากผู้ใช้:',
     options.prompt
   ].join('\n')
-  const args = [...runtime.prefix, ...accessArgs, 'exec', '--json', '--skip-git-repo-check', prompt]
+  const sessionId = typeof options.sessionId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(options.sessionId) ? options.sessionId : null
+  const execArgs = ['exec', '--json', '--skip-git-repo-check']
+  if (sessionId) execArgs.push('resume', sessionId, prompt)
+  else execArgs.push(prompt)
+  const args = [...runtime.prefix, ...accessArgs, ...execArgs]
   codexProcess = spawn(runtime.file, args, { cwd: projectRoot, windowsHide: true, shell: false, env: runtime.env, stdio: ['ignore', 'pipe', 'pipe'] })
   const send = (type, data) => mainWindow?.webContents.send('codex:event', { type, data })
   const cleanOutput = chunk => cleanProcessText(chunk).replace(/Reading additional input from stdin\.\.\.\r?\n?/g, '')
@@ -294,14 +346,16 @@ ipcMain.handle('codex:run', async (_, options) => {
       resolve({ code: -1 })
     })
     codexProcess.on('close', code => {
-      if (code !== 0) send('error', explainCodexFailure(diagnostics))
+      if (code !== 0 && !codexStopRequested) send('error', explainCodexFailure(diagnostics))
       send('done', String(code ?? -1))
       codexProcess = null
+      codexStopRequested = false
       resolve({ code })
     })
   })
 })
 ipcMain.handle('codex:stop', () => {
+  codexStopRequested = true
   return stopProcess(codexProcess)
 })
 
