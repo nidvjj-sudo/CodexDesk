@@ -1,10 +1,9 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, powerSaveBlocker, shell, Tray } = require('electron')
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerSaveBlocker, shell, Tray } = require('electron')
 const { spawn } = require('child_process')
 const { createHash, randomUUID } = require('crypto')
 const { existsSync, mkdirSync, watch } = require('fs')
 const fs = require('fs/promises')
 const path = require('path')
-const { autoUpdater } = require('electron-updater')
 
 let mainWindow
 let projectRoot
@@ -16,6 +15,8 @@ let projectWatchTimer
 let historyMutation = Promise.resolve()
 let updateState = { status: 'idle', version: null, percent: 0 }
 let updateCheckSequence = 0
+let updateInstallerPath = null
+let updateDownloadController = null
 let powerSaveBlockerId = null
 let currentAppSettings
 let discordClient
@@ -362,11 +363,29 @@ function publishUpdateState(next) {
   mainWindow?.webContents.send('update:event', updateState)
 }
 
-function releaseNotes(info) {
-  const value = info?.releaseNotes
-  if (typeof value === 'string') return value.slice(0, 4000)
-  if (Array.isArray(value)) return value.map(item => item?.note || '').filter(Boolean).join('\n').slice(0, 4000)
-  return ''
+function versionParts(value) {
+  const match = String(value || '').trim().match(/^(\d+)\.(\d+)\.(\d+)$/)
+  return match ? match.slice(1).map(Number) : null
+}
+
+function isNewerVersion(latest, current) {
+  const left = versionParts(latest)
+  const right = versionParts(current)
+  if (!left || !right) return false
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] > right[index]
+  }
+  return false
+}
+
+function parseUpdateManifest(source) {
+  const version = source.match(/^version:\s*['"]?([^'"\s]+)['"]?\s*$/m)?.[1]
+  const file = source.match(/^path:\s*['"]?([^'"\r\n]+)['"]?\s*$/m)?.[1]?.trim()
+  const sha512 = source.match(/^sha512:\s*['"]?([^'"\s]+)['"]?\s*$/m)?.[1]
+  if (!versionParts(version) || file !== `CodexDesk-Setup-${version}-x64.exe` || !/^[A-Za-z0-9+/]{80,}={0,2}$/.test(sha512 || '')) {
+    throw new Error('Invalid update manifest')
+  }
+  return { version, file, sha512, url: `https://github.com/nidvjj-sudo/CodexDesk/releases/download/v${version}/${file}` }
 }
 
 async function checkForUpdatesWithTimeout() {
@@ -376,20 +395,27 @@ async function checkForUpdatesWithTimeout() {
   }
   const sequence = ++updateCheckSequence
   publishUpdateState({ status: 'checking', version: null, percent: 0, error: null })
-  let timeout
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 25000)
   try {
-    const timeoutPromise = new Promise((_, reject) => {
-      timeout = setTimeout(() => {
-        const error = new Error('Update check timed out')
-        error.code = 'UPDATE_CHECK_TIMEOUT'
-        reject(error)
-      }, 25000)
+    const response = await net.fetch('https://github.com/nidvjj-sudo/CodexDesk/releases/latest/download/latest.yml', {
+      signal: controller.signal,
+      headers: { 'cache-control': 'no-cache', 'user-agent': `CodexDesk/${app.getVersion()}` }
     })
-    await Promise.race([autoUpdater.checkForUpdates(), timeoutPromise])
+    if (!response.ok) throw new Error(`Update server returned ${response.status}`)
+    const source = await response.text()
+    if (source.length > 20000) throw new Error('Update manifest is too large')
+    const update = parseUpdateManifest(source)
+    if (sequence !== updateCheckSequence) return false
+    if (isNewerVersion(update.version, app.getVersion())) {
+      publishUpdateState({ status: 'available', version: update.version, percent: 0, error: null, downloadUrl: update.url, sha512: update.sha512 })
+    } else {
+      publishUpdateState({ status: 'current', version: app.getVersion(), percent: 0, error: null, downloadUrl: null, sha512: null })
+    }
     return true
   } catch (error) {
     if (sequence === updateCheckSequence) {
-      publishUpdateState({ status: 'error', percent: 0, error: error?.code === 'UPDATE_CHECK_TIMEOUT' ? 'timeout' : 'network' })
+      publishUpdateState({ status: 'error', percent: 0, error: error?.name === 'AbortError' ? 'timeout' : 'network' })
     }
     return false
   } finally {
@@ -397,17 +423,83 @@ async function checkForUpdatesWithTimeout() {
   }
 }
 
-function setupAutoUpdater() {
+function setupUpdateManager() {
   if (!app.isPackaged) return
-  autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = false
-  autoUpdater.on('checking-for-update', () => publishUpdateState({ status: 'checking', percent: 0, error: null }))
-  autoUpdater.on('update-available', info => publishUpdateState({ status: 'available', version: info.version, notes: releaseNotes(info), percent: 0, error: null }))
-  autoUpdater.on('update-not-available', () => publishUpdateState({ status: 'current', version: app.getVersion(), percent: 0, error: null }))
-  autoUpdater.on('download-progress', info => publishUpdateState({ status: 'downloading', percent: Math.round(info.percent || 0) }))
-  autoUpdater.on('update-downloaded', info => publishUpdateState({ status: 'downloaded', version: info.version, percent: 100 }))
-  autoUpdater.on('error', () => publishUpdateState({ status: 'error', percent: 0, error: 'network' }))
   setTimeout(() => void checkForUpdatesWithTimeout(), 5000)
+}
+
+async function downloadUpdatePackage() {
+  if (updateState.status !== 'available' || !updateState.downloadUrl || !updateState.sha512) return false
+  updateDownloadController?.abort()
+  const controller = new AbortController()
+  updateDownloadController = controller
+  const installer = path.join(app.getPath('temp'), `CodexDesk-Setup-${updateState.version}-x64.exe`)
+  let file
+  let inactivityTimer
+  const resetInactivityTimer = () => {
+    clearTimeout(inactivityTimer)
+    inactivityTimer = setTimeout(() => controller.abort(), 30000)
+  }
+  try {
+    publishUpdateState({ status: 'downloading', percent: 0, error: null })
+    const response = await net.fetch(updateState.downloadUrl, { signal: controller.signal, headers: { 'user-agent': `CodexDesk/${app.getVersion()}` } })
+    if (!response.ok || !response.body) throw new Error(`Update download returned ${response.status}`)
+    const total = Number(response.headers.get('content-length'))
+    if (!Number.isSafeInteger(total) || total < 1000000 || total > 500000000) throw new Error('Invalid update size')
+    await fs.rm(installer, { force: true }).catch(() => {})
+    file = await fs.open(installer, 'w')
+    const reader = response.body.getReader()
+    const hash = createHash('sha512')
+    let received = 0
+    let lastPercent = -1
+    resetInactivityTimer()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      resetInactivityTimer()
+      const chunk = Buffer.from(value)
+      received += chunk.length
+      if (received > total) throw new Error('Update size mismatch')
+      hash.update(chunk)
+      await file.write(chunk)
+      const percent = Math.min(99, Math.floor(received / total * 100))
+      if (percent !== lastPercent) {
+        lastPercent = percent
+        publishUpdateState({ status: 'downloading', percent })
+      }
+    }
+    await file.close()
+    file = null
+    if (received !== total || hash.digest('base64') !== updateState.sha512) throw new Error('Update verification failed')
+    updateInstallerPath = installer
+    publishUpdateState({ status: 'downloaded', percent: 100, error: null })
+    return true
+  } catch (error) {
+    await file?.close().catch(() => {})
+    await fs.rm(installer, { force: true }).catch(() => {})
+    publishUpdateState({ status: 'error', percent: 0, error: error?.name === 'AbortError' ? 'timeout' : 'download' })
+    return false
+  } finally {
+    clearTimeout(inactivityTimer)
+    if (updateDownloadController === controller) updateDownloadController = null
+  }
+}
+
+function installDownloadedUpdate() {
+  if (updateState.status !== 'downloaded' || !updateInstallerPath || !existsSync(updateInstallerPath)) return false
+  return new Promise(resolve => {
+    const installer = spawn(updateInstallerPath, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true })
+    installer.once('error', () => {
+      publishUpdateState({ status: 'error', percent: 0, error: 'install' })
+      resolve(false)
+    })
+    installer.once('spawn', () => {
+      installer.unref()
+      isQuitting = true
+      setTimeout(() => app.quit(), 500)
+      resolve(true)
+    })
+  })
 }
 
 function safePath(input) {
@@ -1046,15 +1138,8 @@ ipcMain.handle('clipboard:write', (_, input) => {
 })
 ipcMain.handle('update:state', () => updateState)
 ipcMain.handle('update:check', () => checkForUpdatesWithTimeout())
-ipcMain.handle('update:download', async () => {
-  await autoUpdater.downloadUpdate()
-  return true
-})
-ipcMain.handle('update:install', () => {
-  if (updateState.status !== 'downloaded') return false
-  autoUpdater.quitAndInstall(false, true)
-  return true
-})
+ipcMain.handle('update:download', () => downloadUpdatePackage())
+ipcMain.handle('update:install', () => installDownloadedUpdate())
 ipcMain.handle('codex:run', async (_, options) => {
   if (!projectRoot) throw new Error(uiText('No project is open.', 'ยังไม่ได้เปิดโปรเจกต์'))
   if (codexProcess && !codexProcess.killed) throw new Error(uiText('Codex is already working.', 'Codex กำลังทำงานอยู่'))
@@ -1144,7 +1229,7 @@ if (!app.requestSingleInstanceLock()) {
 app.whenReady().then(() => {
   createWindow()
   createTray()
-  setupAutoUpdater()
+  setupUpdateManager()
   fs.rm(attachmentDirectory(), { recursive: true, force: true }).catch(() => {})
   readAppSettings().then(settings => {
     applyPowerSetting(settings)
@@ -1153,6 +1238,7 @@ app.whenReady().then(() => {
 })
 app.on('before-quit', () => {
   isQuitting = true
+  updateDownloadController?.abort()
   stopProjectWatcher()
   stopProcess(codexProcess)
   stopProcess(authProcess)

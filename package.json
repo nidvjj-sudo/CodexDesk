@@ -1,6 +1,6 @@
 {
   "name": "codexdesk",
-  "version": "2.9.3",
+  "version": "2.9.4",
   "private": true,
   "description": "Desktop workspace for OpenAI Codex CLI",
   "repository": {
@@ -20,7 +20,6 @@
     "@monaco-editor/react": "^4.7.0",
     "@openai/codex": "0.149.0",
     "@xhayper/discord-rpc": "1.3.4",
-    "electron-updater": "6.8.9",
     "lucide-react": "^0.468.0",
     "monaco-editor": "^0.52.2",
     "motion": "^11.15.0",
