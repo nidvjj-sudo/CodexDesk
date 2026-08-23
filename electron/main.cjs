@@ -928,7 +928,7 @@ ipcMain.handle('mcp:add', async (_, payload = {}) => {
   if (payload.transport === 'http') {
     const url = new URL(String(payload.url || ''))
     if (!['http:', 'https:'].includes(url.protocol)) throw new Error(uiText('The URL must use HTTP or HTTPS.', 'URL ต้องเป็น http หรือ https'))
-    args.push('--url', url.toString())
+    args.push('--url', url.toString(), '--oauth-client-registration', 'auto')
   } else if (payload.transport === 'stdio') {
     const command = String(payload.command || '').trim()
     if (!command || command.length > 260 || /[\r\n\0]/.test(command)) throw new Error(uiText('Invalid MCP command.', 'คำสั่ง MCP ไม่ถูกต้อง'))
@@ -938,7 +938,23 @@ ipcMain.handle('mcp:add', async (_, payload = {}) => {
   } else {
     throw new Error(uiText('Invalid MCP transport.', 'ประเภท MCP ไม่ถูกต้อง'))
   }
-  const result = await runCodex(args, app.getPath('home'))
+  const opened = new Set()
+  const onOutput = data => {
+    const output = cleanProcessText(data)
+    mainWindow?.webContents.send('mcp:event', { type: 'output', data: output })
+    for (const match of output.matchAll(/https:\/\/[^\s]+/g)) {
+      const target = match[0].replace(/[),.;]+$/, '')
+      if (!opened.has(target)) {
+        opened.add(target)
+        shell.openExternal(target).catch(() => {})
+      }
+    }
+  }
+  let result = await runCodex(args, app.getPath('home'), onOutput)
+  if (result.code !== 0 && payload.transport === 'http' && /dynamic client registration not supported/i.test(result.output)) {
+    await runCodex(['mcp', 'remove', name], app.getPath('home'))
+    result = await runCodex([...args.slice(0, -1), 'cimd'], app.getPath('home'), onOutput)
+  }
   if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
   await setMcpSetting(name, 'default_tools_approval_mode', '"auto"')
   return listMcpServers()
@@ -958,7 +974,7 @@ ipcMain.handle('mcp:login', async (_, input) => {
   if (codexProcess) throw new Error(uiText('Wait for Codex to finish.', 'กรุณารอให้ Codex ทำงานเสร็จก่อน'))
   const name = validateMcpName(input)
   const opened = new Set()
-  const result = await runCodex(['mcp', 'login', name], app.getPath('home'), data => {
+  const onOutput = data => {
     const output = cleanProcessText(data)
     mainWindow?.webContents.send('mcp:event', { type: 'output', data: output })
     for (const match of output.matchAll(/https:\/\/[^\s]+/g)) {
@@ -968,7 +984,11 @@ ipcMain.handle('mcp:login', async (_, input) => {
         shell.openExternal(url).catch(() => {})
       }
     }
-  })
+  }
+  let result = await runCodex(['mcp', 'login', name, '--oauth-client-registration', 'auto'], app.getPath('home'), onOutput)
+  if (result.code !== 0 && /dynamic client registration not supported/i.test(result.output)) {
+    result = await runCodex(['mcp', 'login', name, '--oauth-client-registration', 'cimd'], app.getPath('home'), onOutput)
+  }
   if (result.code !== 0) throw new Error(explainCodexFailure(result.output))
   return listMcpServers()
 })

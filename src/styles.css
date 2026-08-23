@@ -576,3 +576,23 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
   .workspace > .agent-panel { grid-column: 1; }
   .workspace.artifact-open > .artifact-panel { inset: 0; }
 }
+
+.composer { width: min(780px, calc(100% - 28px)); margin: 0 auto 14px; border-radius: 16px; }
+.composer textarea { height: 52px; min-height: 52px; max-height: 72px; padding: 10px 12px 6px; line-height: 1.45; }
+.composer-footer { min-height: 35px; padding-bottom: 7px; }
+.app-shell.density-compact .composer textarea { height: 46px; min-height: 46px; }
+
+@media (max-width: 680px) {
+  .composer { width: calc(100% - 18px); margin-bottom: 9px; }
+}
+
+.notice-stack { position: fixed; z-index: 90; top: 64px; right: 16px; width: min(340px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.notice-toast { min-width: 0; display: grid; grid-template-columns: 20px minmax(0, 1fr) 24px; align-items: start; gap: 8px; padding: 11px 9px 11px 12px; border: 1px solid #353539; border-radius: 12px; background: #18181bee; color: #d9d9dc; box-shadow: 0 14px 40px #0009; backdrop-filter: blur(18px); pointer-events: auto; }
+.notice-toast > svg { margin-top: 2px; color: #a7a7ad; }
+.notice-toast p { max-height: 150px; margin: 0; overflow: auto; color: #d2d2d5; font-size: 10.5px; line-height: 1.55; white-space: pre-wrap; }
+.notice-toast button { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #77777d; cursor: pointer; }
+.notice-toast button:hover { background: #29292d; color: #eeeeef; }
+
+@media (max-width: 680px) {
+  .notice-stack { top: 54px; right: 9px; width: calc(100vw - 18px); }
+}

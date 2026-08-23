@@ -253,6 +253,7 @@ function App() {
   const [approvalMode, setApprovalMode] = useState('ask')
   const [running, setRunning] = useState(false)
   const [events, setEvents] = useState([])
+  const [notices, setNotices] = useState([])
   const [authenticated, setAuthenticated] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
   const [authOutput, setAuthOutput] = useState('')
@@ -594,7 +595,7 @@ function App() {
     setConversations(historyList)
     sessionIdRef.current = history.sessionId || null
     setSessionId(history.sessionId || null)
-    setEvents((history.events || []).map(event => ({ ...event, queued: false })))
+    setEvents((history.events || []).filter(event => event.kind !== 'system').map(event => ({ ...event, queued: false })))
     setHistoryReady(true)
   }
 
@@ -833,8 +834,19 @@ function App() {
     void executeTask(task)
   }
 
+  function dismissNotice(id) {
+    setNotices(items => items.filter(item => item.id !== id))
+  }
+
   function addSystemMessage(text) {
-    setEvents(items => [...items, { id: `system-${Date.now()}`, kind: 'system', text }])
+    const id = `notice-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const message = String(text || '')
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/[`*_]/g, '')
+      .trim()
+    if (!message) return
+    setNotices(items => [...items.slice(-2), { id, text: message }])
+    window.setTimeout(() => dismissNotice(id), 4500)
   }
 
   async function runChatCommand(input) {
@@ -966,7 +978,7 @@ function App() {
     sessionIdRef.current = history.sessionId || null
     setSessionId(history.sessionId || null)
     setConversationId(history.conversationId)
-    setEvents((history.events || []).map(event => ({ ...event, queued: false })))
+    setEvents((history.events || []).filter(event => event.kind !== 'system').map(event => ({ ...event, queued: false })))
     setActivity([])
   }
 
@@ -1016,7 +1028,7 @@ function App() {
   }
 
   async function copyChat() {
-    const transcript = events.map(event => `${event.kind === 'user' ? t('You', 'คุณ') : event.kind === 'system' ? t('System', 'ระบบ') : 'Codex'}\n${event.text}`).join('\n\n')
+    const transcript = events.filter(event => event.kind !== 'system').map(event => `${event.kind === 'user' ? t('You', 'คุณ') : 'Codex'}\n${event.text}`).join('\n\n')
     await api.copyText(transcript)
     addSystemMessage(t('Copied the full chat.', 'คัดลอกแชททั้งหมดแล้ว'))
   }
@@ -1107,7 +1119,7 @@ function App() {
         <div className="agent-meta"><span>Local workspace</span><span>{allowEdit ? 'Workspace write' : 'Read only'}</span></div>
         <div className="conversation">
           {events.length === 0 && <div className="welcome"><span className="welcome-kicker">CODEX WORKSPACE</span><div className="welcome-icon"><Bot size={22} /></div><h2>{t('What would you like to build?', 'วันนี้ต้องการสร้างอะไร')}</h2><p>{t('Ask Codex to create, inspect, or edit code. No folder is required.', 'สั่งให้ Codex สร้าง อ่าน ตรวจสอบ หรือแก้ไขงานได้โดยไม่ต้องเปิดโฟลเดอร์')}</p><div className="welcome-actions"><button onClick={() => setPrompt(t('Inspect this project and summarize improvements', 'ตรวจสอบโครงสร้างโปรเจกต์และสรุปสิ่งที่ควรปรับปรุง'))}><Search size={13} /><span>{t('Inspect project', 'ตรวจโปรเจกต์')}</span></button><button onClick={() => setPrompt(t('Find potential bugs and fix them safely', 'ค้นหาบัคที่อาจเกิดขึ้นและแก้ไขให้ปลอดภัย'))}><ShieldCheck size={13} /><span>{t('Find bugs', 'ค้นหาบัค')}</span></button><button onClick={() => setPrompt(t('Create a new project for me. Ask only for essential requirements.', 'สร้างโปรเจกต์ใหม่ให้ฉัน ถามเฉพาะข้อมูลที่จำเป็น'))}><Code2 size={13} /><span>{t('New project', 'สร้างโปรเจกต์')}</span></button></div></div>}
-          {events.map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><div className="message-label"><span>{event.kind === 'user' ? event.queued ? t('You · queued', 'คุณ · อยู่ในคิว') : t('You', 'คุณ') : event.kind === 'system' ? t('System', 'ระบบ') : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title={t('Copy message', 'คัดลอกข้อความ')}><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage onOpenFile={openFileLink} text={event.text} /></div></motion.div>)}
+          {events.filter(event => event.kind !== 'system').map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><div className="message-label"><span>{event.kind === 'user' ? event.queued ? t('You · queued', 'คุณ · อยู่ในคิว') : t('You', 'คุณ') : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title={t('Copy message', 'คัดลอกข้อความ')}><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage onOpenFile={openFileLink} text={event.text} /></div></motion.div>)}
           {running && <div className="thinking"><i /><i /><i /></div>}
           <div ref={conversationEnd} className="conversation-end" />
         </div>
@@ -1139,6 +1151,9 @@ function App() {
         </div>
       </aside>
     </main>
+    <div className="notice-stack" aria-live="polite">
+      <AnimatePresence initial={false}>{notices.map(notice => <motion.div className="notice-toast" key={notice.id} initial={{ opacity: 0, x: 24, scale: .97 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 18, scale: .98 }} transition={{ type: 'spring', stiffness: 460, damping: 36 }}><Info size={15} /><p>{notice.text}</p><button onClick={() => dismissNotice(notice.id)} title={t('Dismiss notification', 'ปิดการแจ้งเตือน')}><X size={13} /></button></motion.div>)}</AnimatePresence>
+    </div>
     <AnimatePresence>{settingsOpen && <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <SettingsModal authenticated={authenticated} currentVersion={currentVersion} draft={settingsDraft} onChange={setSettingsDraft} onClearData={clearLocalData} onClose={() => setSettingsOpen(false)} onOpenMcp={() => { setSettingsOpen(false); void openMcp() }} onSave={saveSettings} onSignOut={signOut} onUpdate={() => { setSettingsOpen(false); openUpdate() }} saving={settingsSaving} section={settingsSection} setSection={setSettingsSection} />
     </motion.div>}</AnimatePresence>
