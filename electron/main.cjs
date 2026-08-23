@@ -619,8 +619,11 @@ ipcMain.handle('history:open', (_, id) => mutateHistory(async () => {
 ipcMain.handle('history:clear', (_, id) => mutateHistory(async () => {
   const store = await readHistoryStore()
   const target = id || store.activeId
+  const deletingActive = target === store.activeId
   store.conversations = store.conversations.filter(item => item.conversationId !== target)
-  store.activeId = store.conversations.at(-1)?.conversationId || null
+  if (deletingActive || !store.conversations.some(item => item.conversationId === store.activeId)) {
+    store.activeId = store.conversations.at(-1)?.conversationId || null
+  }
   await writeHistoryStore(store)
   return activeConversation().then(result => result.conversation)
 }))

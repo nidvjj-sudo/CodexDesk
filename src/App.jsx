@@ -9,6 +9,7 @@ const api = window.codexDesk
 const CHAT_COMMANDS = [
   { name: '/help', description: 'ดูคำสั่งทั้งหมด', descriptionEn: 'Show all commands' },
   { name: '/new', description: 'เริ่มแชทใหม่ในโฟลเดอร์นี้', descriptionEn: 'Start a new chat' },
+  { name: '/delete', description: 'ลบแชทปัจจุบัน', descriptionEn: 'Delete the current chat' },
   { name: '/status', description: 'ดูสถานะโปรเจกต์และ Codex', descriptionEn: 'Show project and Codex status' },
   { name: '/diff', description: 'เปิด Git Diff', descriptionEn: 'Open Git Diff' },
   { name: '/files', description: 'เปิดรายการไฟล์', descriptionEn: 'Open project files' },
@@ -657,7 +658,7 @@ function App() {
       await newChat()
       return
     }
-    if (command === '/clear') {
+    if (command === '/clear' || command === '/delete') {
       await clearHistory()
       return
     }
@@ -798,12 +799,25 @@ function App() {
   }
 
   async function clearHistory() {
-    if (running || !confirm('ลบแชทนี้หรือไม่')) return
+    if (running || !confirm(t('Delete this chat? This cannot be undone.', 'ลบแชทนี้หรือไม่ การลบไม่สามารถย้อนกลับได้'))) return
     setHistoryReady(false)
     const history = await api.historyClear(conversationId)
     applyConversation(history)
     setConversations(await api.historyList())
     setHistoryReady(true)
+  }
+
+  async function deleteConversation(id) {
+    if (running || !id || !confirm(t('Delete this chat? This cannot be undone.', 'ลบแชทนี้หรือไม่ การลบไม่สามารถย้อนกลับได้'))) return
+    const deletingCurrent = id === conversationId
+    if (deletingCurrent) setHistoryReady(false)
+    try {
+      const history = await api.historyClear(id)
+      if (deletingCurrent) applyConversation(history)
+      setConversations(await api.historyList())
+    } finally {
+      if (deletingCurrent) setHistoryReady(true)
+    }
   }
 
   async function copyChat() {
@@ -913,7 +927,7 @@ function App() {
         {running && <div className="live-status"><div><i /><span>{liveActivity?.title || t('Starting task', 'กำลังเริ่มงาน')}</span></div>{(liveStats.additions > 0 || liveStats.deletions > 0) && <strong><b>+{liveStats.additions}</b><em>-{liveStats.deletions}</em></strong>}</div>}
         <AnimatePresence>{historyOpen && <motion.div className="activity-drawer history-drawer" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
           <div className="activity-heading"><div><History size={15} /><span>{t('Chat history', 'ประวัติแชท')}</span></div><button className="new-chat-button" onClick={newChat} disabled={running}><Plus size={13} />{t('New chat', 'แชทใหม่')}</button></div>
-          <div className="history-list">{conversations.map(item => <button className={item.conversationId === conversationId ? 'active' : ''} key={item.conversationId} onClick={() => openConversation(item.conversationId)} disabled={running}><span>{item.title}</span><time>{new Date(item.updatedAt).toLocaleString(settings.language === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'short', timeStyle: 'short' })}</time></button>)}</div>
+          <div className="history-list">{conversations.map(item => <div className={`history-item ${item.conversationId === conversationId ? 'active' : ''}`} key={item.conversationId}><button className="history-open" onClick={() => openConversation(item.conversationId)} disabled={running}><span>{item.title}</span><time>{new Date(item.updatedAt).toLocaleString(settings.language === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'short', timeStyle: 'short' })}</time></button><button className="history-delete" onClick={() => deleteConversation(item.conversationId)} disabled={running} title={t('Delete chat', 'ลบแชท')}><Trash2 size={13} /></button></div>)}</div>
         </motion.div>}</AnimatePresence>
         <AnimatePresence>{activityOpen && <motion.div className="activity-drawer" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
           <div className="activity-heading"><div><ListTodo size={15} /><span>{t('Codex activity', 'กิจกรรมของ Codex')}</span></div><div className="activity-heading-actions"><kbd>Ctrl + O</kbd><button onClick={clearHistory} title={t('Clear chat', 'ล้างประวัติแชท')}><Trash2 size={13} /></button></div></div>

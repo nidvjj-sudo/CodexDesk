@@ -212,12 +212,16 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .new-chat-button { height: 27px; display: flex; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid #343438; border-radius: 7px; background: #18181b; color: #c7c7cb; font-size: 8.5px; cursor: pointer; }
 .new-chat-button:disabled { opacity: .4; cursor: default; }
 .history-list { flex: 1; min-height: 0; overflow: auto; padding: 9px 11px 80px; }
-.history-list > button { width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 11px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #aaaab0; text-align: left; cursor: pointer; }
-.history-list > button:hover { background: #171719; }
-.history-list > button.active { border-color: #36363b; background: #1b1b1e; color: #eeeef0; }
-.history-list > button:disabled { cursor: default; }
-.history-list span { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
-.history-list time { color: #66666c; font: 8px "Cascadia Mono", Consolas, monospace; }
+.history-item { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; border: 1px solid transparent; border-radius: 9px; color: #aaaab0; }
+.history-item:hover { background: #171719; }
+.history-item.active { border-color: #36363b; background: #1b1b1e; color: #eeeef0; }
+.history-open { min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 11px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.history-open:disabled, .history-delete:disabled { cursor: default; }
+.history-open span { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.history-open time { color: #66666c; font: 8px "Cascadia Mono", Consolas, monospace; }
+.history-delete { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #696970; opacity: 0; cursor: pointer; transition: opacity .15s, background .15s, color .15s; }
+.history-item:hover .history-delete, .history-item:focus-within .history-delete { opacity: 1; }
+.history-delete:hover { background: #2a2a2e; color: #e3e3e6; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 18px; background: #000b; backdrop-filter: blur(12px); }
 .settings-modal { width: min(920px, 100%); height: min(720px, calc(100vh - 36px)); display: grid; grid-template-rows: 70px minmax(0, 1fr) 64px; overflow: hidden; border: 1px solid #37373c; border-radius: 18px; background: #0d0d0f; box-shadow: 0 30px 100px #000; }
