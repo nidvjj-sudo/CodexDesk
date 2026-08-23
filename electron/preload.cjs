@@ -2,8 +2,12 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('codexDesk', {
   openProject: () => ipcRenderer.invoke('project:open'),
+  createWorkspace: () => ipcRenderer.invoke('project:create-workspace'),
   getProject: () => ipcRenderer.invoke('project:get'),
   getVersion: () => ipcRenderer.invoke('app:version'),
+  settingsGet: () => ipcRenderer.invoke('settings:get'),
+  settingsSave: settings => ipcRenderer.invoke('settings:save', settings),
+  settingsClearLocalData: () => ipcRenderer.invoke('settings:clear-local-data'),
   appUninstall: () => ipcRenderer.invoke('app:uninstall'),
   listFiles: () => ipcRenderer.invoke('files:list'),
   readFile: path => ipcRenderer.invoke('files:read', path),

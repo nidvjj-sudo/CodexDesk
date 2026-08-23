@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, powerSaveBlocker, shell } = require('electron')
 const { spawn } = require('child_process')
 const { createHash, randomUUID } = require('crypto')
 const { existsSync, mkdirSync, watch } = require('fs')
@@ -15,6 +15,141 @@ let projectWatcher
 let projectWatchTimer
 let historyMutation = Promise.resolve()
 let updateState = { status: 'idle', version: null, percent: 0 }
+let powerSaveBlockerId = null
+
+const defaultAppSettings = Object.freeze({
+  language: 'en',
+  theme: 'black',
+  density: 'comfortable',
+  sendMode: 'enter',
+  autoScroll: true,
+  preventSleep: true,
+  notifications: true,
+  defaultAllowEdit: true,
+  defaultApproval: 'ask',
+  model: '',
+  reasoningEffort: 'medium',
+  personality: 'pragmatic',
+  webSearch: 'cached',
+  customInstructions: '',
+  memoriesEnabled: false,
+  useMemories: true,
+  generateMemories: true,
+  disableMemoriesOnExternal: true
+})
+
+function settingsFile() {
+  return path.join(app.getPath('userData'), 'settings.json')
+}
+
+function normalizeAppSettings(input = {}) {
+  const pick = (value, allowed, fallback) => allowed.includes(value) ? value : fallback
+  return {
+    language: pick(input.language, ['en', 'th'], defaultAppSettings.language),
+    theme: pick(input.theme, ['black', 'dark', 'system'], defaultAppSettings.theme),
+    density: pick(input.density, ['comfortable', 'compact'], defaultAppSettings.density),
+    sendMode: pick(input.sendMode, ['enter', 'ctrl-enter'], defaultAppSettings.sendMode),
+    autoScroll: input.autoScroll !== false,
+    preventSleep: input.preventSleep !== false,
+    notifications: input.notifications !== false,
+    defaultAllowEdit: input.defaultAllowEdit !== false,
+    defaultApproval: pick(input.defaultApproval, ['ask', 'auto'], defaultAppSettings.defaultApproval),
+    model: typeof input.model === 'string' && /^[a-zA-Z0-9._-]{0,80}$/.test(input.model.trim()) ? input.model.trim() : '',
+    reasoningEffort: pick(input.reasoningEffort, ['low', 'medium', 'high', 'xhigh'], defaultAppSettings.reasoningEffort),
+    personality: pick(input.personality, ['pragmatic', 'friendly', 'none'], defaultAppSettings.personality),
+    webSearch: pick(input.webSearch, ['cached', 'live', 'disabled'], defaultAppSettings.webSearch),
+    customInstructions: typeof input.customInstructions === 'string' ? input.customInstructions.trim().slice(0, 12000) : '',
+    memoriesEnabled: input.memoriesEnabled === true,
+    useMemories: input.useMemories !== false,
+    generateMemories: input.generateMemories !== false,
+    disableMemoriesOnExternal: input.disableMemoriesOnExternal !== false
+  }
+}
+
+async function readAppSettings() {
+  try {
+    return normalizeAppSettings(JSON.parse(await fs.readFile(settingsFile(), 'utf8')))
+  } catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return { ...defaultAppSettings }
+    throw error
+  }
+}
+
+function tomlValue(value) {
+  if (typeof value === 'boolean') return String(value)
+  return JSON.stringify(String(value))
+}
+
+function updateTomlSetting(lines, section, key, value) {
+  const header = section ? `[${section}]` : null
+  const start = section ? lines.findIndex(line => line.trim() === header) : 0
+  if (section && start < 0) {
+    if (value === null) return
+    if (lines.length && lines.at(-1).trim()) lines.push('')
+    lines.push(header, `${key} = ${tomlValue(value)}`)
+    return
+  }
+  let end = lines.length
+  if (section) {
+    const next = lines.findIndex((line, index) => index > start && /^\s*\[/.test(line))
+    if (next >= 0) end = next
+  } else {
+    const firstHeader = lines.findIndex(line => /^\s*\[/.test(line))
+    if (firstHeader >= 0) end = firstHeader
+  }
+  const pattern = new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=`)
+  const index = lines.findIndex((line, position) => position >= start && position < end && pattern.test(line))
+  if (value === null) {
+    if (index >= 0) lines.splice(index, 1)
+    return
+  }
+  const next = `${key} = ${tomlValue(value)}`
+  if (index >= 0) lines[index] = next
+  else lines.splice(section ? start + 1 : 0, 0, next)
+}
+
+async function syncCodexSettings(settings) {
+  const codexHome = path.join(app.getPath('userData'), 'codex-home')
+  await fs.mkdir(codexHome, { recursive: true })
+  const file = path.join(codexHome, 'config.toml')
+  let source = ''
+  try {
+    source = await fs.readFile(file, 'utf8')
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+  const lines = source.split(/\r?\n/)
+  updateTomlSetting(lines, null, 'model', settings.model || null)
+  updateTomlSetting(lines, null, 'model_reasoning_effort', settings.reasoningEffort)
+  updateTomlSetting(lines, null, 'personality', settings.personality)
+  updateTomlSetting(lines, null, 'web_search', settings.webSearch)
+  updateTomlSetting(lines, 'features', 'memories', settings.memoriesEnabled)
+  updateTomlSetting(lines, 'memories', 'generate_memories', settings.generateMemories)
+  updateTomlSetting(lines, 'memories', 'use_memories', settings.useMemories)
+  updateTomlSetting(lines, 'memories', 'disable_on_external_context', settings.disableMemoriesOnExternal)
+  const temporary = `${file}.${randomUUID()}.tmp`
+  await fs.writeFile(temporary, `${lines.join('\n').trim()}\n`, 'utf8')
+  await fs.rename(temporary, file)
+}
+
+function applyPowerSetting(settings) {
+  if (settings.preventSleep && powerSaveBlockerId === null) powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension')
+  if (!settings.preventSleep && powerSaveBlockerId !== null) {
+    if (powerSaveBlocker.isStarted(powerSaveBlockerId)) powerSaveBlocker.stop(powerSaveBlockerId)
+    powerSaveBlockerId = null
+  }
+}
+
+async function saveAppSettings(input) {
+  const settings = normalizeAppSettings(input)
+  const file = settingsFile()
+  const temporary = `${file}.${randomUUID()}.tmp`
+  await syncCodexSettings(settings)
+  await fs.writeFile(temporary, JSON.stringify(settings, null, 2), 'utf8')
+  await fs.rename(temporary, file)
+  applyPowerSetting(settings)
+  return settings
+}
 
 const ignored = new Set(['.git', '.idea', '.vs', 'node_modules', 'bin', 'obj', 'dist', 'release', 'build', 'venv', '.venv', '__pycache__'])
 
@@ -400,9 +535,27 @@ ipcMain.handle('project:open', async () => {
   startProjectWatcher()
   return { path: projectRoot, name: path.basename(projectRoot) }
 })
+ipcMain.handle('project:create-workspace', async () => {
+  const documents = app.getPath('documents')
+  projectRoot = path.join(documents, 'CodexDesk Workspace')
+  await fs.mkdir(projectRoot, { recursive: true })
+  startProjectWatcher()
+  return { path: projectRoot, name: path.basename(projectRoot), automatic: true }
+})
 
 ipcMain.handle('project:get', () => projectRoot ? { path: projectRoot, name: path.basename(projectRoot) } : null)
 ipcMain.handle('app:version', () => app.getVersion())
+ipcMain.handle('settings:get', () => readAppSettings())
+ipcMain.handle('settings:save', (_, input) => saveAppSettings(input))
+ipcMain.handle('settings:clear-local-data', async () => {
+  if (codexProcess) throw new Error('กรุณารอให้ Codex ทำงานเสร็จก่อน')
+  await Promise.all([
+    fs.rm(path.join(app.getPath('userData'), 'chat-history'), { recursive: true, force: true }),
+    fs.rm(path.join(app.getPath('userData'), 'undo-history'), { recursive: true, force: true })
+  ])
+  historyMutation = Promise.resolve()
+  return true
+})
 ipcMain.handle('app:uninstall', async () => {
   if (!app.isPackaged || process.platform !== 'win32') throw new Error('ถอนการติดตั้งได้เฉพาะแอปที่ติดตั้งบน Windows')
   const directory = path.dirname(process.execPath)
@@ -617,6 +770,7 @@ ipcMain.handle('codex:run', async (_, options) => {
   if (!projectRoot) throw new Error('ยังไม่ได้เปิดโปรเจกต์')
   if (codexProcess && !codexProcess.killed) throw new Error('Codex กำลังทำงานอยู่')
   const runtime = codexRuntime()
+  const settings = await readAppSettings()
   codexStopRequested = false
   const accessArgs = options.allowEdit
     ? ['--sandbox', 'danger-full-access', '--ask-for-approval', 'never']
@@ -630,6 +784,8 @@ ipcMain.handle('codex:run', async (_, options) => {
     'Do not run Git commands unless a .git directory exists.',
     'Do not expose internal tool logs in the final response.',
     modeInstruction,
+    settings.webSearch === 'disabled' ? 'Do not use web search.' : settings.webSearch === 'live' ? 'Use live web search whenever current information would improve accuracy.' : 'Use cached web search whenever external information would improve accuracy.',
+    settings.customInstructions ? `Personal instructions from the user:\n${settings.customInstructions}` : '',
     '',
     'คำสั่งจากผู้ใช้:',
     options.prompt
@@ -659,6 +815,9 @@ ipcMain.handle('codex:run', async (_, options) => {
     codexProcess.on('close', code => {
       if (code !== 0 && !codexStopRequested) send('error', explainCodexFailure(diagnostics))
       send('done', String(code ?? -1))
+      if (code === 0 && settings.notifications && Notification.isSupported() && !mainWindow?.isFocused()) {
+        new Notification({ title: 'CodexDesk', body: 'Codex ทำงานเสร็จแล้ว' }).show()
+      }
       codexProcess = null
       codexStopRequested = false
       resolve({ code })
@@ -673,11 +832,13 @@ ipcMain.handle('codex:stop', () => {
 app.whenReady().then(() => {
   createWindow()
   setupAutoUpdater()
+  readAppSettings().then(applyPowerSetting).catch(() => {})
 })
 app.on('before-quit', () => {
   stopProjectWatcher()
   stopProcess(codexProcess)
   stopProcess(authProcess)
+  if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) powerSaveBlocker.stop(powerSaveBlockerId)
 })
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
