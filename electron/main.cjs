@@ -296,6 +296,7 @@ async function createUndoSnapshot(label = '') {
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
   const directory = path.join(undoDirectory(), id)
   const backupRoot = path.join(directory, 'files')
+  await fs.mkdir(directory, { recursive: true })
   for (const file of files) {
     const destination = path.join(backupRoot, file.relative)
     await fs.mkdir(path.dirname(destination), { recursive: true })
