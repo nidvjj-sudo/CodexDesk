@@ -865,7 +865,6 @@ function App() {
       const result = await api.codexRun({ conversationId: chatId, prompt: task.text, allowEdit: task.allowEdit, sessionId: sessionsByChat.current.get(chatId) || null, attachments: task.attachments })
       completed = result.code === 0
       await refreshFiles()
-      if (chatId === conversationIdRef.current) await loadDiff()
     } catch (error) {
       appendChatEvents(chatId, [{ kind: 'error', text: error.message }])
     } finally {
