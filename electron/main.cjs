@@ -824,6 +824,91 @@ function runCodex(args, cwd, onData) {
   })
 }
 
+function normalizeWeeklyUsage(response = {}) {
+  const snapshots = Object.values(response.rateLimitsByLimitId || {})
+  if (response.rateLimits) snapshots.push(response.rateLimits)
+  const seen = new Set()
+  const windows = []
+  for (const snapshot of snapshots) {
+    if (!snapshot || typeof snapshot !== 'object') continue
+    const key = `${snapshot.limitId || ''}:${snapshot.primary?.windowDurationMins || ''}:${snapshot.secondary?.windowDurationMins || ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    for (const [kind, window] of [['secondary', snapshot.secondary], ['primary', snapshot.primary]]) {
+      if (!window || !Number.isFinite(window.usedPercent)) continue
+      windows.push({
+        kind,
+        limitId: snapshot.limitId || null,
+        limitName: snapshot.limitName || null,
+        planType: snapshot.planType || null,
+        usedPercent: Math.max(0, Math.min(100, Math.round(window.usedPercent))),
+        resetsAt: Number.isFinite(window.resetsAt) ? window.resetsAt : null,
+        windowDurationMins: Number.isFinite(window.windowDurationMins) ? window.windowDurationMins : null
+      })
+    }
+  }
+  windows.sort((left, right) => {
+    const leftCodex = left.limitId === 'codex' ? 1 : 0
+    const rightCodex = right.limitId === 'codex' ? 1 : 0
+    return rightCodex - leftCodex || (right.windowDurationMins || 0) - (left.windowDurationMins || 0)
+  })
+  const weekly = windows.find(window => (window.windowDurationMins || 0) >= 7 * 24 * 60) || windows.find(window => window.kind === 'secondary')
+  if (!weekly) return { status: 'unavailable' }
+  return {
+    status: 'ready',
+    ...weekly,
+    remainingPercent: Math.max(0, 100 - weekly.usedPercent),
+    refreshedAt: Date.now()
+  }
+}
+
+function readCodexWeeklyUsage() {
+  const runtime = codexRuntime()
+  return new Promise(resolve => {
+    const child = spawn(runtime.file, [...runtime.prefix, 'app-server', '--listen', 'stdio://'], {
+      cwd: app.getPath('home'),
+      windowsHide: true,
+      shell: false,
+      env: runtime.env,
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    let settled = false
+    let buffer = ''
+    let timeout = null
+    const finish = value => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      stopProcess(child)
+      resolve(value)
+    }
+    const send = value => {
+      if (!settled && child.stdin.writable) child.stdin.write(`${JSON.stringify(value)}\n`)
+    }
+    timeout = setTimeout(() => finish({ status: 'unavailable' }), 12000)
+    child.stderr.resume()
+    child.stdout.on('data', chunk => {
+      buffer += chunk.toString('utf8')
+      if (buffer.length > 1024 * 1024) return finish({ status: 'unavailable' })
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const message = JSON.parse(line)
+          if (message.id === 1 && message.result) send({ id: 2, method: 'account/rateLimits/read', params: null })
+          if (message.id === 1 && message.error) finish({ status: 'unavailable' })
+          if (message.id === 2 && message.result) finish(normalizeWeeklyUsage(message.result))
+          if (message.id === 2 && message.error) finish({ status: /authentication required/i.test(message.error.message || '') ? 'signed-out' : 'unavailable' })
+        } catch {}
+      }
+    })
+    child.on('error', () => finish({ status: 'unavailable' }))
+    child.on('close', () => finish({ status: 'unavailable' }))
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'CodexDesk', version: app.getVersion() } } })
+  })
+}
+
 function validateMcpName(value) {
   const name = String(value || '').trim()
   if (!/^[a-zA-Z0-9_-]{1,40}$/.test(name)) throw new Error(uiText('Plugin names may contain only letters, numbers, hyphens, and underscores.', 'ชื่อปลั๊กอินใช้ได้เฉพาะตัวอักษร ตัวเลข ขีดกลาง และขีดล่าง'))
@@ -1005,6 +1090,7 @@ ipcMain.handle('auth:status', async () => {
     return { authenticated: false, message: error.message }
   }
 })
+ipcMain.handle('usage:get', () => readCodexWeeklyUsage())
 ipcMain.handle('auth:start', async (_, mode = 'browser') => {
   if (!['browser', 'device'].includes(mode)) throw new Error(uiText('Invalid sign-in mode.', 'รูปแบบการเข้าสู่ระบบไม่ถูกต้อง'))
   if (authProcess && !authProcess.killed) stopProcess(authProcess)

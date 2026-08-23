@@ -529,8 +529,22 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .sidebar-history-item > button:last-child:hover { background: #29292d; color: #e2e2e4; }
 .sidebar-empty { padding: 18px 9px; color: #5f5f65; font-size: 9px; }
 .sidebar-footer { flex: 0 0 auto; padding-top: 9px; border-top: 1px solid #242427; }
-.sidebar-footer > button:first-child { height: 49px; display: grid; grid-template-columns: 20px minmax(0, 1fr) 14px; }
-.sidebar-footer > button:first-child > span { display: flex; flex-direction: column; gap: 2px; }
+.weekly-limit { margin: 0 2px 8px; padding: 10px 10px 8px; border: 1px solid #2b2b2f; border-radius: 11px; background: #151517; }
+.weekly-limit-heading, .weekly-limit-meta { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.weekly-limit-heading strong { color: #e5e5e7; font-size: 9px; font-weight: 600; }
+.weekly-limit-heading span { color: #b8b8bd; font-size: 8px; white-space: nowrap; }
+.weekly-limit-track { height: 4px; margin: 8px 0 6px; overflow: hidden; border-radius: 999px; background: #313136; }
+.weekly-limit-track i { display: block; height: 100%; border-radius: inherit; background: #eeeeef; transition: width .3s ease; }
+.weekly-limit-meta small { min-width: 0; overflow: hidden; color: #707077; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.weekly-limit-meta button { width: 22px; height: 22px; flex: 0 0 auto; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #77777d; cursor: pointer; }
+.weekly-limit-meta button:hover:not(:disabled) { background: #28282c; color: #ededee; }
+.weekly-limit-meta button:disabled { opacity: .35; cursor: default; }
+.weekly-limit.loading .weekly-limit-meta svg { animation: spin .8s linear infinite; }
+.weekly-limit.loading .weekly-limit-track i { animation: weekly-loading 1.2s ease-in-out infinite; }
+.weekly-limit.signed-out .weekly-limit-track i, .weekly-limit.unavailable .weekly-limit-track i { width: 0 !important; }
+@keyframes weekly-loading { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+.sidebar-footer > button:first-of-type { height: 49px; display: grid; grid-template-columns: 20px minmax(0, 1fr) 14px; }
+.sidebar-footer > button:first-of-type > span { display: flex; flex-direction: column; gap: 2px; }
 .sidebar-footer > button strong { overflow: hidden; font-size: 9.5px; font-weight: 550; text-overflow: ellipsis; }
 .sidebar-footer > button small { overflow: hidden; color: #626268; font-size: 7.5px; text-overflow: ellipsis; }
 

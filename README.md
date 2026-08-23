@@ -10,7 +10,7 @@
 
 1. ติดตั้ง Node.js LTS x64
 2. เปิด `build.cmd`
-3. เปิด `CodexDesk-Setup-2.9.4-x64.exe` ในโฟลเดอร์ `release`
+3. เปิด `CodexDesk-Setup-2.9.5-x64.exe` ในโฟลเดอร์ `release`
 4. กดปุ่มเข้าสู่ระบบภายใน CodexDesk
 
 ## พัฒนา
@@ -28,6 +28,7 @@ npm run dev
 - Codex CLI
 - เข้าสู่ระบบ ChatGPT ผ่านเบราว์เซอร์เป็นค่าเริ่มต้น และมี Device Code เป็นวิธีสำรอง
 - ปุ่มสถานะการเชื่อมต่อ ChatGPT บนแถบด้านบน
+- แสดง Weekly limit และเวลารีเซ็ตจากบัญชี ChatGPT ที่ล็อกอินอยู่ พร้อมรีเฟรชอัตโนมัติ
 - ไม่มีหน้าต่าง CMD ระหว่างใช้งาน
 - เรียก Codex แบบ Native background process และปิด stdin อัตโนมัติ
 - ตรวจสอบ Codex runtime ก่อนสร้างแอป

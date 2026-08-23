@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('codexDesk', {
   authStatus: () => ipcRenderer.invoke('auth:status'),
   authStart: mode => ipcRenderer.invoke('auth:start', mode),
   authLogout: () => ipcRenderer.invoke('auth:logout'),
+  usageGet: () => ipcRenderer.invoke('usage:get'),
   mcpList: () => ipcRenderer.invoke('mcp:list'),
   mcpAdd: payload => ipcRenderer.invoke('mcp:add', payload),
   mcpRemove: name => ipcRenderer.invoke('mcp:remove', name),

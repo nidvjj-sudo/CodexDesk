@@ -255,6 +255,7 @@ function App() {
   const [events, setEvents] = useState([])
   const [notices, setNotices] = useState([])
   const [authenticated, setAuthenticated] = useState(false)
+  const [weeklyUsage, setWeeklyUsage] = useState({ status: 'idle' })
   const [authOpen, setAuthOpen] = useState(false)
   const [authOutput, setAuthOutput] = useState('')
   const [authState, setAuthState] = useState('idle')
@@ -299,6 +300,7 @@ function App() {
   const attachmentInput = useRef(null)
   const artifactEvent = useRef(null)
   const openedChange = useRef(null)
+  const usageRequestId = useRef(0)
 
   const t = (english, thai) => settings.language === 'th' ? thai : english
   const dirty = currentFile && content !== savedContent
@@ -373,13 +375,25 @@ function App() {
     })
   }, [])
 
+  useEffect(() => {
+    if (!authenticated) {
+      usageRequestId.current += 1
+      setWeeklyUsage({ status: 'signed-out' })
+      return undefined
+    }
+    void refreshWeeklyUsage()
+    const timer = window.setInterval(() => void refreshWeeklyUsage(false), 5 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [authenticated])
+
   useEffect(() => api.onCodexEvent(event => {
     if (event.type === 'done') {
       parseCodexOutput('', true)
+      if (authenticated) window.setTimeout(() => void refreshWeeklyUsage(false), 1000)
     }
     if (event.type === 'stdout') parseCodexOutput(event.data)
     if (event.type === 'stderr' || event.type === 'error') setEvents(items => [...items, { kind: 'error', text: event.data }])
-  }), [settings.language])
+  }), [settings.language, authenticated])
 
   useEffect(() => {
     const keyDown = event => {
@@ -425,6 +439,17 @@ function App() {
     if (!settings.autoScroll) return
     conversationEnd.current?.scrollIntoView({ behavior: running ? 'smooth' : 'auto', block: 'end' })
   }, [events, running, settings.autoScroll])
+
+  async function refreshWeeklyUsage(showLoading = true) {
+    const requestId = ++usageRequestId.current
+    if (showLoading) setWeeklyUsage(current => ({ ...current, status: 'loading' }))
+    try {
+      const usage = await api.usageGet()
+      if (requestId === usageRequestId.current) setWeeklyUsage(usage)
+    } catch {
+      if (requestId === usageRequestId.current) setWeeklyUsage({ status: 'unavailable' })
+    }
+  }
 
   useEffect(() => {
     if (!project || !historyReady) return undefined
@@ -582,6 +607,17 @@ function App() {
 
   const authUrl = authOutput.match(/https:\/\/(?:auth\.openai\.com|chatgpt\.com)\/[A-Za-z0-9/_?=&.%-]+/)?.[0]
   const deviceCode = authOutput.match(/\b[A-Z0-9]{4,6}-[A-Z0-9]{4,6}\b/)?.[0]
+  const weeklyRemaining = Number.isFinite(weeklyUsage.remainingPercent) ? Math.max(0, Math.min(100, weeklyUsage.remainingPercent)) : 0
+  const weeklyStatusLabel = weeklyUsage.status === 'ready'
+    ? t(`${weeklyRemaining}% remaining`, `เหลือ ${weeklyRemaining}%`)
+    : weeklyUsage.status === 'loading'
+      ? t('Loading…', 'กำลังโหลด…')
+      : weeklyUsage.status === 'signed-out'
+        ? t('Sign in required', 'ต้องเข้าสู่ระบบ')
+        : t('Unavailable', 'ไม่พร้อมใช้งาน')
+  const weeklyMetaLabel = weeklyUsage.resetsAt
+    ? `${t('Resets', 'รีเซ็ต')} ${new Date(weeklyUsage.resetsAt * 1000).toLocaleString(settings.language === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'short', timeStyle: 'short' })}`
+    : weeklyUsage.planType || t('ChatGPT account usage', 'การใช้งานบัญชี ChatGPT')
 
   async function loadProject(value) {
     setHistoryReady(false)
@@ -1100,6 +1136,11 @@ function App() {
         </nav>
         <div className="sidebar-recents"><div className="sidebar-section-title"><span>{t('Recents', 'ล่าสุด')}</span><Search size={13} /></div><div className="sidebar-history">{conversations.map(item => <div className={`sidebar-history-item ${item.conversationId === conversationId ? 'active' : ''}`} key={item.conversationId}><button onClick={() => openConversation(item.conversationId)} disabled={running}><span>{item.title}</span></button><button onClick={() => deleteConversation(item.conversationId)} disabled={running} title={t('Delete chat', 'ลบแชท')}><Trash2 size={12} /></button></div>)}{conversations.length === 0 && <div className="sidebar-empty">{t('No chats yet', 'ยังไม่มีแชท')}</div>}</div></div>
         <div className="sidebar-footer">
+          <div className={`weekly-limit ${weeklyUsage.status}`} aria-live="polite">
+            <div className="weekly-limit-heading"><strong>{t('Weekly limit', 'ขีดจำกัดรายสัปดาห์')}</strong><span>{weeklyStatusLabel}</span></div>
+            <div className="weekly-limit-track"><i style={{ width: `${weeklyRemaining}%` }} /></div>
+            <div className="weekly-limit-meta"><small>{weeklyMetaLabel}</small><button onClick={() => void refreshWeeklyUsage()} disabled={!authenticated || weeklyUsage.status === 'loading'} title={t('Refresh usage', 'รีเฟรชการใช้งาน')}><RefreshCw size={11} /></button></div>
+          </div>
           <button onClick={openProject}><FolderOpen size={16} /><span><strong>{project?.name || t('Open project', 'เปิดโปรเจกต์')}</strong><small>{t('Choose workspace', 'เลือกพื้นที่ทำงาน')}</small></span><ChevronRight size={14} /></button>
           <button onClick={() => openSettings()}><SettingsIcon size={16} /><span>{t('Settings', 'การตั้งค่า')}</span></button>
           <button onClick={openAccount}>{authenticated ? <Check size={16} /> : <LogIn size={16} />}<span>{authenticated ? t('ChatGPT connected', 'เชื่อมต่อ ChatGPT แล้ว') : t('Connect ChatGPT', 'เชื่อมต่อ ChatGPT')}</span></button>
