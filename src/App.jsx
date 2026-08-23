@@ -35,6 +35,25 @@ const MCP_PRESETS = [
   { name: 'google_drive', label: 'Google Drive', description: 'ค้นหา อ่าน และจัดการไฟล์', url: 'https://drivemcp.googleapis.com/mcp/v1' }
 ]
 
+function getMcpAuthState(status, http) {
+  if (!http) return { kind: 'not-required', connected: true, canConnect: false, canLogout: false }
+
+  const value = String(status || '').toLowerCase()
+  if (value === 'oauth' || value === 'authenticated' || value === 'logged_in') {
+    return { kind: 'connected', connected: true, canConnect: false, canLogout: true }
+  }
+  if (value === 'bearer_token') {
+    return { kind: 'connected', connected: true, canConnect: false, canLogout: false }
+  }
+  if (value === 'not_logged_in') {
+    return { kind: 'not-connected', connected: false, canConnect: true, canLogout: false }
+  }
+  if (value === 'unsupported') {
+    return { kind: 'not-required', connected: true, canConnect: false, canLogout: false }
+  }
+  return { kind: 'unknown', connected: false, canConnect: false, canLogout: false }
+}
+
 const DEFAULT_SETTINGS = {
   language: 'en', theme: 'black', density: 'comfortable', sendMode: 'enter', autoScroll: true,
   preventSleep: true, notifications: true, defaultAllowEdit: true, defaultApproval: 'ask',
@@ -930,7 +949,7 @@ function App() {
             {mcpForm.transport === 'http' ? <input value={mcpForm.url} onChange={event => setMcpForm(value => ({ ...value, url: event.target.value }))} placeholder="https://server.example.com/mcp" /> : <><input value={mcpForm.command} onChange={event => setMcpForm(value => ({ ...value, command: event.target.value }))} placeholder={t('Command, e.g. npx', 'คำสั่ง เช่น npx')} /><textarea value={mcpForm.arguments} onChange={event => setMcpForm(value => ({ ...value, arguments: event.target.value }))} placeholder={t('One argument per line\n-y\npackage-name', 'อาร์กิวเมนต์ บรรทัดละหนึ่งค่า\n-y\npackage-name')} /></>}
             <button className="mcp-install" onClick={installMcp} disabled={mcpBusy || !mcpForm.name.trim() || (mcpForm.transport === 'http' ? !mcpForm.url.trim() : !mcpForm.command.trim())}>{t('Install plugin', 'ติดตั้งปลั๊กอิน')}</button>
           </motion.section>}</AnimatePresence>
-          <section className="mcp-installed"><span className="mcp-section-label">{t('Installed', 'ติดตั้งแล้ว')} {mcpServers.length}</span>{mcpServers.length === 0 && !mcpBusy ? <div className="mcp-empty">{t('No plugins installed', 'ยังไม่มีปลั๊กอิน')}</div> : mcpServers.map(server => { const http = server.transport?.type === 'streamable_http'; const authenticated = ['authenticated', 'logged_in'].includes(String(server.auth_status || '').toLowerCase()); return <div className={`mcp-server ${server.enabled ? '' : 'disabled'}`} key={server.name}><span className="mcp-server-icon">{http ? <Globe2 size={15} /> : <SquareTerminal size={15} />}</span><div className="mcp-server-info"><strong>{server.name}</strong><small>{http ? server.transport.url : [server.transport?.command, ...(server.transport?.args || [])].filter(Boolean).join(' ')}</small></div><span className={`mcp-auth ${authenticated ? 'ready' : ''}`}>{authenticated ? t('Connected', 'เชื่อมแล้ว') : server.auth_status === 'unsupported' ? t('No sign-in needed', 'ไม่ต้องล็อกอิน') : t('Not connected', 'ยังไม่เชื่อม')}</span><div className="mcp-server-actions">{http && server.auth_status !== 'unsupported' && <button onClick={() => runMcpAction(() => authenticated ? api.mcpLogout(server.name) : api.mcpLogin(server.name))} disabled={mcpBusy || running}>{authenticated ? t('Sign out', 'ออกบัญชี') : t('Connect', 'เชื่อมบัญชี')}</button>}<button title={server.enabled ? t('Disable', 'ปิด') : t('Enable', 'เปิด')} onClick={() => runMcpAction(() => api.mcpToggle(server.name, !server.enabled))} disabled={mcpBusy || running}><Power size={13} /></button><button title={t('Uninstall', 'ถอนการติดตั้ง')} onClick={() => confirm(t(`Uninstall ${server.name}?`, `ถอนปลั๊กอิน ${server.name} หรือไม่`)) && runMcpAction(() => api.mcpRemove(server.name))} disabled={mcpBusy || running}><Trash2 size={13} /></button></div></div> })}</section>
+          <section className="mcp-installed"><span className="mcp-section-label">{t('Installed', 'ติดตั้งแล้ว')} {mcpServers.length}</span>{mcpServers.length === 0 && !mcpBusy ? <div className="mcp-empty">{t('No plugins installed', 'ยังไม่มีปลั๊กอิน')}</div> : mcpServers.map(server => { const http = server.transport?.type === 'streamable_http'; const auth = getMcpAuthState(server.auth_status, http); const authLabel = auth.kind === 'connected' ? t('Connected', 'เชื่อมแล้ว') : auth.kind === 'not-required' ? t('No sign-in needed', 'ไม่ต้องล็อกอิน') : auth.kind === 'not-connected' ? t('Not connected', 'ยังไม่เชื่อม') : t('Status unavailable', 'ไม่ทราบสถานะ'); return <div className={`mcp-server ${server.enabled ? '' : 'disabled'}`} key={server.name}><span className="mcp-server-icon">{http ? <Globe2 size={15} /> : <SquareTerminal size={15} />}</span><div className="mcp-server-info"><strong>{server.name}</strong><small>{http ? server.transport.url : [server.transport?.command, ...(server.transport?.args || [])].filter(Boolean).join(' ')}</small></div><span className={`mcp-auth ${auth.connected ? 'ready' : ''}`}>{authLabel}</span><div className="mcp-server-actions">{auth.canConnect && <button onClick={() => runMcpAction(() => api.mcpLogin(server.name))} disabled={mcpBusy || running}>{t('Connect', 'เชื่อมบัญชี')}</button>}{auth.canLogout && <button onClick={() => runMcpAction(() => api.mcpLogout(server.name))} disabled={mcpBusy || running}>{t('Sign out', 'ออกบัญชี')}</button>}<button title={server.enabled ? t('Disable', 'ปิด') : t('Enable', 'เปิด')} onClick={() => runMcpAction(() => api.mcpToggle(server.name, !server.enabled))} disabled={mcpBusy || running}><Power size={13} /></button><button title={t('Uninstall', 'ถอนการติดตั้ง')} onClick={() => confirm(t(`Uninstall ${server.name}?`, `ถอนปลั๊กอิน ${server.name} หรือไม่`)) && runMcpAction(() => api.mcpRemove(server.name))} disabled={mcpBusy || running}><Trash2 size={13} /></button></div></div> })}</section>
           {mcpBusy && <div className="mcp-loading"><i />{t('Working', 'กำลังดำเนินการ')}</div>}
           {mcpOutput && <pre className="mcp-output">{mcpOutput}</pre>}
           {mcpError && <div className="mcp-error">{mcpError}</div>}

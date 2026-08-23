@@ -10,7 +10,7 @@
 
 1. ติดตั้ง Node.js LTS x64
 2. เปิด `build.cmd`
-3. เปิด `CodexDesk-Setup-2.7.1-x64.exe` ในโฟลเดอร์ `release`
+3. เปิด `CodexDesk-Setup-2.7.2-x64.exe` ในโฟลเดอร์ `release`
 4. กดปุ่มเข้าสู่ระบบภายใน CodexDesk
 
 ## พัฒนา
