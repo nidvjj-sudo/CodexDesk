@@ -474,14 +474,15 @@ async function downloadUpdatePackage() {
 function installDownloadedUpdate() {
   if (updateState.status !== 'downloaded' || !updateInstallerPath || !existsSync(updateInstallerPath)) return false
   return new Promise(resolve => {
-    const installer = spawn(updateInstallerPath, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true })
+    publishUpdateState({ status: 'installing', percent: 100, error: null })
+    const installer = spawn(updateInstallerPath, ['--updated', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: false, shell: false })
     installer.once('error', () => {
       publishUpdateState({ status: 'error', percent: 0, error: 'install' })
       resolve(false)
     })
     installer.once('spawn', () => {
       installer.unref()
-      setTimeout(() => app.quit(), 500)
+      setTimeout(() => app.quit(), 350)
       resolve(true)
     })
   })

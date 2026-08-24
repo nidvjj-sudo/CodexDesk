@@ -19,6 +19,14 @@ for (const [name, width, height] of assets) {
   }
 }
 
+const installerScript = readFileSync(path.join(root, 'build', 'installer.nsh'), 'utf8')
+if (!installerScript.includes('${ifNot} ${isUpdated}')) throw new Error('Update-safe uninstall guard is missing')
+
+const mainSource = readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
+if (!mainSource.includes("['--updated', '--force-run']") || mainSource.includes("['--updated', '/S'")) {
+  throw new Error('The updater must launch the visible installer in update mode')
+}
+
 if (process.platform !== 'win32') process.exit(0)
 
 const candidates = [
