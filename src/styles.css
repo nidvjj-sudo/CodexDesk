@@ -193,7 +193,7 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .send-button:hover:not(:disabled) { background: #fff; transform: translateY(-1px); }
 .send-button:disabled { background: #29292d; color: #65656b; cursor: default; }
 
-.activity-drawer { position: absolute; z-index: 5; inset: 79px 0 116px; min-height: 0; display: flex; flex-direction: column; border: 1px solid #2b2b2f; border-right: 0; background: #0d0d0ff5; backdrop-filter: blur(18px); box-shadow: -18px 0 50px #0006; }
+.activity-drawer { position: absolute; z-index: 5; inset: 79px 0 98px; min-height: 0; display: flex; flex-direction: column; border: 1px solid #2b2b2f; border-right: 0; background: #0d0d0ff5; backdrop-filter: blur(18px); box-shadow: -18px 0 50px #0006; }
 .activity-heading { flex: 0 0 43px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px; border-bottom: 1px solid #252529; }
 .activity-heading > div { display: flex; align-items: center; gap: 7px; font-size: 10.5px; font-weight: 600; }
 .activity-heading-actions { display: flex; align-items: center; gap: 6px; }
@@ -598,11 +598,14 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
   .workspace.artifact-open > .artifact-panel { inset: 0; }
 }
 
-.composer { width: min(780px, calc(100% - 28px)); margin: 0 auto 14px; border-radius: 16px; }
-.live-status { width: min(780px, calc(100% - 28px)); margin: 0 auto 8px; }
-.composer textarea { height: 52px; min-height: 52px; max-height: 72px; padding: 10px 12px 6px; line-height: 1.45; }
-.composer-footer { min-height: 35px; padding-bottom: 7px; }
-.app-shell.density-compact .composer textarea { height: 46px; min-height: 46px; }
+.composer, .live-status { width: min(660px, calc(100% - 28px)); }
+.composer { margin: 0 auto 11px; border-radius: 13px; }
+.live-status { min-height: 28px; margin: 0 auto 6px; padding: 5px 9px; border-radius: 8px; }
+.live-status > div > span { font-size: 8.5px; }
+.composer textarea { height: 43px; min-height: 43px; max-height: 60px; padding: 9px 11px 4px; font-size: 11px; line-height: 1.4; }
+.composer-footer { min-height: 31px; padding: 0 7px 6px 10px; }
+.send-button { width: 27px; height: 27px; }
+.app-shell.density-compact .composer textarea { height: 38px; min-height: 38px; }
 
 @media (max-width: 680px) {
   .composer, .live-status { width: calc(100% - 18px); }
