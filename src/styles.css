@@ -193,7 +193,7 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .send-button:hover:not(:disabled) { background: #fff; transform: translateY(-1px); }
 .send-button:disabled { background: #29292d; color: #65656b; cursor: default; }
 
-.activity-drawer { position: absolute; z-index: 5; inset: 79px 0 0; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid #2b2b2f; background: #0d0d0ff5; backdrop-filter: blur(18px); box-shadow: -18px 0 50px #0006; }
+.activity-drawer { position: absolute; z-index: 5; inset: 79px 0 116px; min-height: 0; display: flex; flex-direction: column; border: 1px solid #2b2b2f; border-right: 0; background: #0d0d0ff5; backdrop-filter: blur(18px); box-shadow: -18px 0 50px #0006; }
 .activity-heading { flex: 0 0 43px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px; border-bottom: 1px solid #252529; }
 .activity-heading > div { display: flex; align-items: center; gap: 7px; font-size: 10.5px; font-weight: 600; }
 .activity-heading-actions { display: flex; align-items: center; gap: 6px; }
@@ -619,3 +619,85 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 @media (max-width: 680px) {
   .notice-stack { top: 54px; right: 9px; width: calc(100vw - 18px); }
 }
+
+/* Light appearance. The is-light class also resolves the System option without
+   duplicating every selector inside a media query. */
+.app-shell.is-light {
+  color-scheme: light;
+  --bg: #f7f7f8;
+  --panel: #ffffff;
+  --line: #dcdce0;
+  --line-soft: #e9e9ec;
+  --muted: #68686e;
+  color: #202024;
+  background: radial-gradient(circle at 78% -20%, #e4e4e8 0, transparent 30%), var(--bg);
+}
+.app-shell.is-light :is(.titlebar, .chat-sidebar, .workspace > .agent-panel, .artifact-panel, .artifact-heading, .artifact-toolbar, .activity-drawer, .command-menu, .settings-modal, .settings-content, .mcp-modal, .mcp-content, .update-modal, .auth-modal) {
+  background: #fff;
+  color: #202024;
+  border-color: #dedee2;
+  box-shadow: none;
+}
+.app-shell.is-light .titlebar { background: #f7f7f8ee; border-color: #d9d9dd; box-shadow: 0 8px 26px #20202812; }
+.app-shell.is-light :is(.brand-mark, .sidebar-logo > span, .welcome-icon, .auth-symbol, .mcp-symbol) {
+  border-color: #d5d5da;
+  background: linear-gradient(145deg, #fff, #ececef);
+  color: #202024;
+  box-shadow: 0 8px 24px #20202810;
+}
+.app-shell.is-light :is(.project-switcher, .account-button, .update-button, .agent-heading button, .sidebar-new, .weekly-limit, .composer, .live-status, .message.user, .message.system, .welcome-actions button, .queue-item, .file-search, .device-code, .settings-field select, .settings-field input, .settings-field textarea, .settings-callout, .privacy-card, .settings-account, .settings-wide-action, .reasoning-picker button, .mcp-form input, .mcp-form textarea, .mcp-server-icon, .mcp-output, .mcp-error, .update-details, .update-notes, .notice-toast) {
+  border-color: #d5d5da;
+  background: #f6f6f7;
+  color: #27272b;
+  box-shadow: none;
+}
+.app-shell.is-light :is(.project-switcher:hover, .account-button:hover, .update-button:hover, .agent-heading button:hover:not(:disabled), .sidebar-new:hover:not(:disabled), .welcome-actions button:hover, .settings-wide-action:hover, .reasoning-picker button:hover, .reasoning-picker button.active) {
+  border-color: #b9b9c0;
+  background: #ececef;
+  color: #111114;
+}
+.app-shell.is-light .workspace { background: #fafafa; }
+.app-shell.is-light .chat-sidebar { border-color: #dedee2; background: #f7f7f8; }
+.app-shell.is-light :is(.sidebar-nav, .sidebar-footer, .sidebar-recents, .agent-heading, .agent-meta, .artifact-heading, .artifact-toolbar, .settings-heading, .settings-footer, .mcp-heading, .mcp-footer, .activity-heading, .queue-section) { border-color: #dedee2; }
+.app-shell.is-light :is(.sidebar-nav button:hover, .sidebar-nav button.active, .sidebar-footer > button:hover, .sidebar-history-item:hover, .sidebar-history-item.active, .history-item:hover, .history-item.active, .tree-row:hover, .command-menu > button:hover) {
+  background: #e9e9ec;
+  color: #17171a;
+}
+.app-shell.is-light :is(.sidebar-logo, .sidebar-new, .sidebar-history-item > button, .sidebar-footer > button, .agent-heading, .agent-heading button, .artifact-tabs button, .artifact-toolbar > span, .activity-heading, .history-open, .command-menu > button) { color: #3d3d42; }
+.app-shell.is-light :is(.sidebar-section-title, .sidebar-empty, .agent-meta, .message-label > span, .welcome, .welcome-kicker, .queue-indicator, .composer-options button, .weekly-limit-meta small, .settings-heading p, .settings-title p, .settings-row small, .settings-field small, .usage-hint, .mcp-server-info small) { color: #696970; }
+.app-shell.is-light :is(.weekly-limit-heading strong, .sidebar-footer > button strong, .welcome h2, .message.user .markdown p, .message.user .markdown li, .markdown h1, .markdown h2, .markdown h3, .markdown h4, .activity-item strong, .settings-heading h2, .settings-title h3, .settings-row strong, .settings-field > span, .mcp-server-info strong) { color: #202024; }
+.app-shell.is-light .weekly-limit-track { background: #d7d7db; }
+.app-shell.is-light .weekly-limit-track i { background: #242428; }
+.app-shell.is-light .status-dot.active { background: #242428; box-shadow: 0 0 0 4px #0000000d; }
+.app-shell.is-light .conversation { background: #fff; }
+.app-shell.is-light .message.user { background: #f0f0f2; }
+.app-shell.is-light .message.system { background: #f7f7f8; }
+.app-shell.is-light .markdown :is(p, li) { color: #34343a; }
+.app-shell.is-light .markdown code { border-color: #d7d7dc; background: #eeeeF1; color: #242428; }
+.app-shell.is-light .markdown pre { border-color: #d7d7dc; background: #f4f4f6; }
+.app-shell.is-light .markdown th { background: #eaeaed; color: #202024; }
+.app-shell.is-light .markdown :is(th, td) { border-color: #d1d1d6; }
+.app-shell.is-light .markdown-link { color: #2457a6; }
+.app-shell.is-light .composer { background: #f7f7f8f2; box-shadow: 0 12px 34px #20202814; }
+.app-shell.is-light .composer:focus-within { border-color: #9b9ba3; box-shadow: 0 12px 34px #2020281c, 0 0 0 1px #2020280b; }
+.app-shell.is-light .composer textarea { color: #202024; caret-color: #202024; }
+.app-shell.is-light .composer textarea::placeholder { color: #8a8a91; }
+.app-shell.is-light .send-button { background: #242428; color: #fff; }
+.app-shell.is-light .send-button:hover:not(:disabled) { background: #000; }
+.app-shell.is-light .send-button:disabled { background: #d9d9dd; color: #96969c; }
+.app-shell.is-light .permission span.enabled { border-color: #242428; background: #242428; box-shadow: 0 0 0 3px #0000000d; }
+.app-shell.is-light .activity-drawer { background: #fffffff5; box-shadow: -14px 0 35px #20202812; }
+.app-shell.is-light :is(.file-change-list, .artifact-diff > pre, .response-artifact > pre) { border-color: #d9d9dd; background: #f7f7f8; color: #29292e; }
+.app-shell.is-light :is(.artifact-tabs button.active, .mcp-form-tabs button.active) { background: #ededf0; color: #17171a; box-shadow: inset 0 2px #252529; }
+.app-shell.is-light :is(.settings-heading, .settings-footer, .mcp-heading, .mcp-footer) { background: #f7f7f8; }
+.app-shell.is-light .settings-layout > nav { background: #f2f2f4; border-color: #dedee2; }
+.app-shell.is-light .settings-layout > nav button { color: #606067; }
+.app-shell.is-light .settings-layout > nav button:hover, .app-shell.is-light .settings-layout > nav button.active { background: #e3e3e7; color: #202024; }
+.app-shell.is-light .settings-toggle { background: #d5d5da; }
+.app-shell.is-light .settings-toggle.on { background: #242428; }
+.app-shell.is-light .settings-footer button.primary, .app-shell.is-light :is(.auth-primary, .update-primary, .mcp-install) { background: #242428; color: #fff; }
+.app-shell.is-light .modal-backdrop { background: #20202455; }
+.app-shell.is-light .notice-toast { background: #fffffff2; color: #202024; box-shadow: 0 14px 40px #20202826; }
+.app-shell.is-light .notice-toast p { color: #34343a; }
+.app-shell.is-light :is(.monaco-editor, .monaco-editor-background, .monaco-editor .margin) { background-color: #fff !important; }
+.app-shell.is-light ::-webkit-scrollbar-thumb { background: #b6b6bc; background-clip: content-box; }

@@ -88,7 +88,7 @@ function SettingsModal({ authenticated, currentVersion, draft, onChange, onClear
     <div className="settings-layout">
       <nav>{navigation.map(([id, label, Icon]) => <button key={id} className={section === id ? 'active' : ''} onClick={() => setSection(id)}><Icon size={14} /><span>{label}</span></button>)}</nav>
       <main className="settings-content">
-        {section === 'general' && <><div className="settings-title"><Monitor size={18} /><div><h3>{l('General', 'ทั่วไป')}</h3><p>{l('Appearance and app behavior', 'หน้าตาและพฤติกรรมของแอป')}</p></div></div><div className="settings-grid">{select('language', l('App language', 'ภาษาแอป'), draft.language, [{ value: 'en', label: 'English' }, { value: 'th', label: 'ไทย' }])}{select('theme', l('Theme', 'ธีม'), draft.theme, [{ value: 'black', label: l('Pure black', 'ดำสนิท') }, { value: 'dark', label: l('Dark gray', 'เทาเข้ม') }, { value: 'system', label: l('System', 'ตามระบบ') }])}{select('density', l('Density', 'ความหนาแน่น'), draft.density, [{ value: 'comfortable', label: l('Comfortable', 'สบายตา') }, { value: 'compact', label: l('Compact', 'กะทัดรัด') }])}{select('sendMode', l('Send message', 'ปุ่มส่งข้อความ'), draft.sendMode, [{ value: 'enter', label: l('Enter to send', 'Enter เพื่อส่ง') }, { value: 'ctrl-enter', label: l('Ctrl + Enter to send', 'Ctrl + Enter เพื่อส่ง') }])}</div>{row(l('Auto-scroll chat', 'เลื่อนแชทอัตโนมัติ'), l('Follow new messages while Codex is working', 'ตามข้อความใหม่ระหว่าง Codex ทำงาน'), 'autoScroll')}{row(l('Prevent sleep while app is open', 'ป้องกันเครื่องพักระหว่างเปิดแอป'), l('Keeps long-running tasks active in the background', 'ช่วยให้งานยาวทำต่อได้ในเบื้องหลัง'), 'preventSleep')}{row(l('Notify when tasks finish', 'แจ้งเตือนเมื่องานเสร็จ'), l('Show a Windows notification when the app is not focused', 'แสดง Windows notification เมื่อแอปไม่ได้อยู่ด้านหน้า'), 'notifications')}</>}
+        {section === 'general' && <><div className="settings-title"><Monitor size={18} /><div><h3>{l('General', 'ทั่วไป')}</h3><p>{l('Appearance and app behavior', 'หน้าตาและพฤติกรรมของแอป')}</p></div></div><div className="settings-grid">{select('language', l('App language', 'ภาษาแอป'), draft.language, [{ value: 'en', label: 'English' }, { value: 'th', label: 'ไทย' }])}{select('theme', l('Theme', 'ธีม'), draft.theme, [{ value: 'black', label: l('Pure black', 'ดำสนิท') }, { value: 'dark', label: l('Dark gray', 'เทาเข้ม') }, { value: 'light', label: l('Light', 'สว่าง') }, { value: 'system', label: l('System', 'ตามระบบ') }])}{select('density', l('Density', 'ความหนาแน่น'), draft.density, [{ value: 'comfortable', label: l('Comfortable', 'สบายตา') }, { value: 'compact', label: l('Compact', 'กะทัดรัด') }])}{select('sendMode', l('Send message', 'ปุ่มส่งข้อความ'), draft.sendMode, [{ value: 'enter', label: l('Enter to send', 'Enter เพื่อส่ง') }, { value: 'ctrl-enter', label: l('Ctrl + Enter to send', 'Ctrl + Enter เพื่อส่ง') }])}</div>{row(l('Auto-scroll chat', 'เลื่อนแชทอัตโนมัติ'), l('Follow new messages while Codex is working', 'ตามข้อความใหม่ระหว่าง Codex ทำงาน'), 'autoScroll')}{row(l('Prevent sleep while app is open', 'ป้องกันเครื่องพักระหว่างเปิดแอป'), l('Keeps long-running tasks active in the background', 'ช่วยให้งานยาวทำต่อได้ในเบื้องหลัง'), 'preventSleep')}{row(l('Notify when tasks finish', 'แจ้งเตือนเมื่องานเสร็จ'), l('Show a Windows notification when the app is not focused', 'แสดง Windows notification เมื่อแอปไม่ได้อยู่ด้านหน้า'), 'notifications')}</>}
         {section === 'personal' && <><div className="settings-title"><Palette size={18} /><div><h3>Personalization</h3><p>{l('Choose how Codex responds and remembers context', 'กำหนดวิธีที่ Codex ตอบและจดจำบริบท')}</p></div></div>{select('personality', l('Response style', 'บุคลิกการตอบ'), draft.personality, [{ value: 'pragmatic', label: l('Pragmatic and concise', 'กระชับและตรงประเด็น') }, { value: 'friendly', label: l('Friendly and explanatory', 'เป็นมิตรและอธิบายมากขึ้น') }, { value: 'none', label: l('No personality', 'ไม่กำหนดบุคลิก') }])}<label className="settings-field full"><span>{l('Custom instructions', 'คำแนะนำส่วนตัว')}</span><textarea value={draft.customInstructions} onChange={event => set('customInstructions', event.target.value)} maxLength={12000} placeholder={l('For example: use clean code and verify changes before editing', 'เช่น ตอบเป็นภาษาไทย เขียนโค้ดให้อ่านง่าย และตรวจสอบก่อนแก้ไข')} /><small>{draft.customInstructions.length.toLocaleString()} / 12,000 {l('characters', 'ตัวอักษร')}</small></label><div className="settings-subheading"><Brain size={14} />{l('Codex memories', 'ความทรงจำของ Codex')}</div>{row(l('Enable memories', 'เปิดใช้ความทรงจำ'), l('Use the Codex CLI memory system', 'ให้ Codex ใช้ระบบ memories ของ CLI'), 'memoriesEnabled')}{row(l('Use saved memories', 'ใช้ความทรงจำที่มีอยู่'), l('Apply remembered context to future tasks', 'นำสิ่งที่จำไว้มาใช้กับงานใหม่'), 'useMemories', !draft.memoriesEnabled)}{row(l('Generate new memories', 'สร้างความทรงจำใหม่'), l('Learn reusable guidance for future tasks', 'เรียนรู้คำแนะนำที่เป็นประโยชน์สำหรับงานถัดไป'), 'generateMemories', !draft.memoriesEnabled)}{row(l('Disable with external context', 'ปิดเมื่อมีบริบทภายนอก'), l('Reduce context mixing when external tools are connected', 'ลดการผสมข้อมูลเมื่อเชื่อมเครื่องมือภายนอก'), 'disableMemoriesOnExternal', !draft.memoriesEnabled)}</>}
         {section === 'model' && <><div className="settings-title"><Brain size={18} /><div><h3>{l('Model & web search', 'โมเดลและการค้นเว็บ')}</h3><p>{l('Defaults used by Codex CLI for new tasks', 'ค่าหลักที่ Codex CLI ใช้กับทุกแชทใหม่')}</p></div></div>{select('model', l('Model', 'โมเดล'), draft.model, [{ value: '', label: l('Account default', 'ค่าเริ่มต้นของบัญชี') }, { value: 'gpt-5.6-sol', label: l('GPT-5.6 Sol — most capable', 'GPT-5.6 Sol — ฉลาดที่สุด') }, { value: 'gpt-5.6-terra', label: l('GPT-5.6 Terra — balanced', 'GPT-5.6 Terra — สมดุล') }, { value: 'gpt-5.6-luna', label: l('GPT-5.6 Luna — fast and efficient', 'GPT-5.6 Luna — เร็วและประหยัด') }, { value: 'gpt-5.5', label: l('GPT-5.5 — previous generation', 'GPT-5.5 — รุ่นก่อนหน้า') }])}<div className="settings-subheading"><Brain size={14} />{l('Reasoning effort', 'ระดับการคิด')}</div><div className="reasoning-picker">{[{ value: 'low', label: 'Low', detail: l('Fast, lower usage', 'เร็วและใช้น้อย') }, { value: 'medium', label: 'Medium', detail: l('Balanced, recommended', 'สมดุล แนะนำ') }, { value: 'high', label: 'High', detail: l('More thorough', 'คิดละเอียดขึ้น') }, { value: 'xhigh', label: 'Extra high', detail: l('Most complex tasks', 'งานซับซ้อนที่สุด') }].map(option => <button key={option.value} className={draft.reasoningEffort === option.value ? 'active' : ''} onClick={() => set('reasoningEffort', option.value)}><strong>{option.label}</strong><small>{option.detail}</small></button>)}</div><p className="usage-hint">{l('Higher levels usually take longer and use more quota. Actual usage depends on the model, task, and ChatGPT plan.', 'ระดับที่สูงขึ้นมักใช้เวลานานและใช้โควตามากขึ้น จำนวนจริงขึ้นอยู่กับโมเดล งาน และแผน ChatGPT ของคุณ')}</p>{select('webSearch', l('Web search', 'การค้นเว็บ'), draft.webSearch, [{ value: 'cached', label: l('Cached — safer default', 'Cached ปลอดภัยกว่า') }, { value: 'live', label: l('Live — latest information', 'Live ข้อมูลล่าสุด') }, { value: 'disabled', label: l('Disabled', 'ปิด') }])}<div className="settings-callout"><Globe2 size={15} /><div><strong>{l('Codex can search the web', 'Codex ค้นเว็บได้จริง')}</strong><p>{l('Cached uses OpenAI’s search index. Live fetches current pages. Web content can be untrusted, so verify sources.', 'Cached ใช้ดัชนีของ OpenAI ส่วน Live เปิดหน้าเว็บล่าสุด การค้นเว็บอาจพบเนื้อหาที่ไม่น่าเชื่อถือ ควรตรวจแหล่งอ้างอิงเสมอ')}</p></div></div></>}
         {section === 'permissions' && <><div className="settings-title"><LockKeyhole size={18} /><div><h3>{l('Default permissions', 'สิทธิ์เริ่มต้น')}</h3><p>{l('Applied the next time the app starts', 'ใช้เมื่อเริ่มแอปครั้งถัดไป')}</p></div></div>{row(l('Allow file edits', 'อนุญาตแก้ไขไฟล์'), l('Codex can read, create, edit, and run tools in the project', 'Codex อ่าน สร้าง แก้ไข และรันเครื่องมือในโปรเจกต์ได้'), 'defaultAllowEdit')}<div className="settings-grid">{select('defaultApproval', l('Confirmation before tasks', 'การยืนยันก่อนเริ่มงาน'), draft.defaultApproval, [{ value: 'ask', label: l('Ask every time', 'ถามทุกครั้ง') }, { value: 'auto', label: l('Automatic', 'ทำอัตโนมัติ') }])}</div><div className="settings-callout"><ShieldCheck size={15} /><div><strong>{l('Permissions apply to local work', 'สิทธิ์มีผลกับงานในเครื่อง')}</strong><p>{l('Ask mode confirms before file-changing tasks. Risky commands remain subject to Codex and operating-system policy.', 'โหมดถามก่อนจะขออนุญาตก่อนเริ่มงานที่แก้ไฟล์ ส่วนคำสั่งเสี่ยงยังขึ้นอยู่กับนโยบายของ Codex และระบบปฏิบัติการ')}</p></div></div></>}
@@ -116,6 +116,12 @@ function FileNode({ node, onOpen, level = 0 }) {
   return <button className="tree-row file-row" style={{ paddingLeft: 25 + level * 14 }} onClick={() => onOpen(node)}><File size={13} /><span>{node.name}</span></button>
 }
 
+function normalizeChatMarkdown(value) {
+  return String(value || '')
+    .replace(/\((https:\/\/[^\s)]+)\)\[([^\]\n]+)\]/gi, '[$2]($1)')
+    .replace(/\(([^)\n]+)\)\[(https:\/\/[^\]\s]+)\]/gi, '[$1]($2)')
+}
+
 function MarkdownMessage({ onOpenFile, text }) {
   const openLink = href => {
     if (!href) return
@@ -127,7 +133,7 @@ function MarkdownMessage({ onOpenFile, text }) {
     components={{
       a: ({ href, children }) => <button className="markdown-link" onClick={() => openLink(href)}>{children}</button>
     }}
-  >{text}</ReactMarkdown>
+  >{normalizeChatMarkdown(text)}</ReactMarkdown>
 }
 
 function extractResponseArtifact(events) {
@@ -289,6 +295,7 @@ function App() {
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [attachments, setAttachments] = useState([])
   const [attachmentBusy, setAttachmentBusy] = useState(false)
+  const [systemLight, setSystemLight] = useState(() => window.matchMedia?.('(prefers-color-scheme: light)').matches ?? false)
   const codexBuffers = useRef(new Map())
   const conversationEnd = useRef(null)
   const runningChatsRef = useRef(new Set())
@@ -302,12 +309,14 @@ function App() {
   const editorRef = useRef(null)
   const pendingEditorLocation = useRef(null)
   const attachmentInput = useRef(null)
+  const promptInput = useRef(null)
   const artifactEvent = useRef(null)
   const openedChange = useRef(null)
   const usageRequestId = useRef(0)
   const usageRefreshing = useRef(false)
 
   const t = (english, thai) => settings.language === 'th' ? thai : english
+  const lightTheme = settings.theme === 'light' || (settings.theme === 'system' && systemLight)
   const running = Boolean(conversationId && runningChats[conversationId])
   const hasRunningChats = Object.keys(runningChats).length > 0
   const dirty = currentFile && content !== savedContent
@@ -318,6 +327,14 @@ function App() {
   const liveStats = currentTaskActivity.reduce((total, item) => ({ additions: total.additions + (item.additions || 0), deletions: total.deletions + (item.deletions || 0) }), { additions: 0, deletions: 0 })
   const visibleFiles = useMemo(() => filterFileTree(files, fileQuery), [files, fileQuery])
   const responseArtifact = useMemo(() => extractResponseArtifact(events), [events])
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(prefers-color-scheme: light)')
+    if (!media) return undefined
+    const update = event => setSystemLight(event.matches)
+    media.addEventListener?.('change', update)
+    return () => media.removeEventListener?.('change', update)
+  }, [])
 
   useEffect(() => {
     if (!responseArtifact) {
@@ -1076,27 +1093,53 @@ function App() {
   }
 
   async function newChat() {
-    if (!project) await ensureWorkspace()
+    const previousId = conversationIdRef.current
     setHistoryReady(false)
-    conversationIdRef.current = null
-    await api.historySave({ conversationId, events, sessionId }).catch(() => {})
-    const history = await api.historyNew()
-    applyConversation(history)
-    setConversations(await api.historyList())
-    setHistoryOpen(false)
-    setHistoryReady(true)
+    try {
+      if (!project) await ensureWorkspace()
+      conversationIdRef.current = null
+      await api.historySave({ conversationId, events, sessionId }).catch(() => {})
+      const history = await api.historyNew()
+      applyConversation(history)
+      setConversations(await api.historyList())
+    } catch (error) {
+      conversationIdRef.current = previousId
+      addSystemMessage(t(`Could not create a new chat: ${error.message}`, `สร้างแชทใหม่ไม่สำเร็จ: ${error.message}`))
+    } finally {
+      setHistoryOpen(false)
+      setActivityOpen(false)
+      setMobileView('chat')
+      setHistoryReady(true)
+      window.requestAnimationFrame(() => promptInput.current?.focus())
+    }
   }
 
   async function openConversation(id) {
-    if (id === conversationIdRef.current) return
+    if (id === conversationIdRef.current) {
+      setHistoryOpen(false)
+      setActivityOpen(false)
+      setMobileView('chat')
+      window.requestAnimationFrame(() => promptInput.current?.focus())
+      return
+    }
+    const previousId = conversationIdRef.current
     setHistoryReady(false)
-    conversationIdRef.current = null
-    await api.historySave({ conversationId, events, sessionId }).catch(() => {})
-    const history = await api.historyOpen(id)
-    applyConversation(history)
-    setConversations(await api.historyList())
-    setHistoryOpen(false)
-    setHistoryReady(true)
+    try {
+      conversationIdRef.current = null
+      await api.historySave({ conversationId, events, sessionId }).catch(() => {})
+      const history = await api.historyOpen(id)
+      applyConversation(history)
+      setConversations(await api.historyList())
+    } catch (error) {
+      conversationIdRef.current = previousId
+      addSystemMessage(t(`Could not open this chat: ${error.message}`, `เปิดแชทนี้ไม่สำเร็จ: ${error.message}`))
+    } finally {
+      setHistoryOpen(false)
+      setActivityOpen(false)
+      setMobileView('chat')
+      setHistoryReady(true)
+      window.requestAnimationFrame(() => promptInput.current?.focus())
+    }
   }
 
   async function clearHistory() {
@@ -1171,7 +1214,7 @@ function App() {
     return ({ js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript', py: 'python', json: 'json', html: 'html', css: 'css', cs: 'csharp', java: 'java', go: 'go', rs: 'rust', md: 'markdown', yml: 'yaml', yaml: 'yaml' })[extension] || 'plaintext'
   }, [currentFile])
 
-  return <div className={`app-shell theme-${settings.theme} density-${settings.density}`}>
+  return <div className={`app-shell theme-${settings.theme} density-${settings.density} ${lightTheme ? 'is-light' : ''}`}>
     <header className="titlebar">
       <div className="brand"><div className="brand-mark"><Code2 size={15} /></div><div className="brand-copy"><span>CodexDesk</span><small>AI CODE WORKSPACE</small></div></div>
       <button className="project-switcher" onClick={openProject}><FolderOpen size={15} /><span>{project?.name || t('Open project', 'เปิดโปรเจกต์')}</span><ChevronDown size={13} /></button>
@@ -1208,7 +1251,7 @@ function App() {
       <aside className={`artifact-panel ${artifactView ? 'open' : ''}`}>
         <div className="artifact-heading"><div className="artifact-tabs"><button className={artifactView === 'files' ? 'active' : ''} onClick={() => setArtifactView('files')}><FolderOpen size={13} />{t('Files', 'ไฟล์')}</button>{currentFile && <button className={artifactView === 'file' ? 'active' : ''} onClick={() => setArtifactView('file')}><Code2 size={13} />{currentFile.name}</button>}<button className={artifactView === 'diff' ? 'active' : ''} onClick={() => void loadDiff()}><GitCompare size={13} />{t('Changes', 'การเปลี่ยนแปลง')}</button>{responseArtifact && <button className={artifactView === 'response' ? 'active' : ''} onClick={() => setArtifactView('response')}>{responseArtifact.type === 'code' ? <Code2 size={13} /> : <File size={13} />}{responseArtifact.type === 'code' ? 'Code' : 'Text'}</button>}</div><button className="artifact-close" onClick={() => setArtifactView(null)} title={t('Close panel', 'ปิดแผง')}><X size={15} /></button></div>
         {artifactView === 'files' && <div className="artifact-files"><div className="project-label"><FolderOpen size={13} /><span>{project?.name || t('No project open', 'ยังไม่ได้เปิดโปรเจกต์')}</span><button onClick={refreshFiles}><RefreshCw size={13} /></button></div><label className="file-search"><Search size={13} /><input value={fileQuery} onChange={event => setFileQuery(event.target.value)} placeholder={t('Search files', 'ค้นหาไฟล์')} /></label><div className="file-tree">{visibleFiles.map(node => <FileNode key={node.path} node={node} onOpen={openFile} />)}{visibleFiles.length === 0 && <div className="file-empty">{project ? t('No files found', 'ไม่พบไฟล์') : t('Open a project to browse files', 'เปิดโปรเจกต์เพื่อดูไฟล์')}</div>}</div></div>}
-        {artifactView === 'file' && currentFile && <div className="artifact-editor"><div className="artifact-toolbar"><span><File size={13} />{currentFile.name}</span><button disabled={!dirty} onClick={saveFile}><Save size={13} />{t('Save', 'บันทึก')}</button></div><div className="editor-wrap"><Editor value={content} onChange={value => setContent(value ?? '')} onMount={mountEditor} language={language} theme="vs-dark" options={{ minimap: { enabled: true }, fontFamily: 'Cascadia Mono, Consolas, monospace', fontSize: 13, padding: { top: 16 }, smoothScrolling: true, cursorSmoothCaretAnimation: 'on', renderLineHighlight: 'all', wordWrap: 'off', automaticLayout: true }} /></div><div className="editor-status"><span>{language.toUpperCase()}</span><span>{dirty ? t('Unsaved', 'ยังไม่ได้บันทึก') : t('Saved', 'บันทึกแล้ว')}</span><span>UTF-8</span></div></div>}
+        {artifactView === 'file' && currentFile && <div className="artifact-editor"><div className="artifact-toolbar"><span><File size={13} />{currentFile.name}</span><button disabled={!dirty} onClick={saveFile}><Save size={13} />{t('Save', 'บันทึก')}</button></div><div className="editor-wrap"><Editor value={content} onChange={value => setContent(value ?? '')} onMount={mountEditor} language={language} theme={lightTheme ? 'vs' : 'vs-dark'} options={{ minimap: { enabled: true }, fontFamily: 'Cascadia Mono, Consolas, monospace', fontSize: 13, padding: { top: 16 }, smoothScrolling: true, cursorSmoothCaretAnimation: 'on', renderLineHighlight: 'all', wordWrap: 'off', automaticLayout: true }} /></div><div className="editor-status"><span>{language.toUpperCase()}</span><span>{dirty ? t('Unsaved', 'ยังไม่ได้บันทึก') : t('Saved', 'บันทึกแล้ว')}</span><span>UTF-8</span></div></div>}
         {artifactView === 'diff' && <div className="artifact-diff"><div className="artifact-toolbar"><span><GitCompare size={13} />Git Diff</span><button onClick={loadDiff}><RefreshCw size={13} />{t('Refresh', 'รีเฟรช')}</button></div><pre>{diff || t('Codex changes will appear here', 'การเปลี่ยนแปลงของ Codex จะแสดงที่นี่')}</pre></div>}
         {artifactView === 'response' && responseArtifact && <div className="response-artifact"><div className="artifact-toolbar"><span>{responseArtifact.type === 'code' ? <Code2 size={13} /> : <File size={13} />}{responseArtifact.language.toUpperCase()}</span><button onClick={() => api.copyText(responseArtifact.content)}><Copy size={13} />{t('Copy', 'คัดลอก')}</button></div><pre><code>{responseArtifact.content}</code></pre></div>}
       </aside>
@@ -1236,7 +1279,7 @@ function App() {
           {commandSuggestions.length > 0 && <div className="command-menu"><div className="command-menu-label"><Command size={12} />{t('Commands', 'คำสั่ง')}</div>{commandSuggestions.map(command => <button key={command.name} onClick={() => setPrompt(command.name === '/approval' ? '/approval ' : command.name)}><code>{command.name}</code><span>{settings.language === 'th' ? command.description : command.descriptionEn}</span></button>)}</div>}
           <input ref={attachmentInput} className="attachment-input" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" multiple onChange={addAttachments} />
           {(attachments.length > 0 || attachmentBusy) && <div className="attachment-strip">{attachments.map(item => <div className="attachment-card" key={item.id}>{item.kind === 'image' ? <img src={item.preview} alt="" /> : <video src={item.preview} muted preload="metadata" />}<span>{item.kind === 'image' ? <ImageIcon size={11} /> : <Video size={11} />}{item.name}</span><button onClick={() => removeAttachment(item.id)} title={t('Remove attachment', 'ลบไฟล์แนบ')}><X size={11} /></button></div>)}{attachmentBusy && <div className="attachment-processing"><i />{t('Processing media', 'กำลังประมวลผลสื่อ')}</div>}</div>}
-          <textarea value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { const send = settings.sendMode === 'ctrl-enter' ? event.key === 'Enter' && event.ctrlKey : event.key === 'Enter' && !event.shiftKey; if (send) { event.preventDefault(); void sendPrompt() } }} placeholder={project ? t('Ask Codex…', 'สั่งงาน Codex…') : t('Ask Codex to create something new…', 'สั่งให้ Codex สร้างงานใหม่…')} />
+          <textarea ref={promptInput} value={prompt} onFocus={() => { setHistoryOpen(false); setActivityOpen(false) }} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { const send = settings.sendMode === 'ctrl-enter' ? event.key === 'Enter' && event.ctrlKey : event.key === 'Enter' && !event.shiftKey; if (send) { event.preventDefault(); void sendPrompt() } }} placeholder={project ? t('Ask Codex…', 'สั่งงาน Codex…') : t('Ask Codex to create something new…', 'สั่งให้ Codex สร้างงานใหม่…')} />
           {queue.length > 0 && <div className="queue-indicator">{t(`${queue.length} message${queue.length === 1 ? '' : 's'} waiting`, `มี ${queue.length} ข้อความรอทำงาน`)}</div>}
           <div className="composer-footer">
             <div className="composer-options">

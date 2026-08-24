@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerSaveBlocker, shell, Tray } = require('electron')
+const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, Notification, powerSaveBlocker, shell } = require('electron')
 const { spawn } = require('child_process')
 const { createHash, randomUUID } = require('crypto')
 const { existsSync, mkdirSync, watch } = require('fs')
@@ -28,8 +28,6 @@ let discordClientId = ''
 let discordReady = false
 let discordActivity = 'ready'
 let discordOutputBuffer = ''
-let tray
-let isQuitting = false
 const appStartedAt = new Date()
 
 const defaultAppSettings = Object.freeze({
@@ -70,7 +68,7 @@ function normalizeAppSettings(input = {}) {
   const pick = (value, allowed, fallback) => allowed.includes(value) ? value : fallback
   return {
     language: pick(input.language, ['en', 'th'], defaultAppSettings.language),
-    theme: pick(input.theme, ['black', 'dark', 'system'], defaultAppSettings.theme),
+    theme: pick(input.theme, ['black', 'dark', 'light', 'system'], defaultAppSettings.theme),
     density: pick(input.density, ['comfortable', 'compact'], defaultAppSettings.density),
     sendMode: pick(input.sendMode, ['enter', 'ctrl-enter'], defaultAppSettings.sendMode),
     autoScroll: input.autoScroll !== false,
@@ -185,7 +183,6 @@ function discordLabels(kind) {
 
 function updateDiscordActivity(kind = discordActivity) {
   discordActivity = kind
-  updateTrayMenu()
   if (!discordReady || !discordClient?.user) return
   const state = currentAppSettings.discordShowProject && projectRoot
     ? uiText(`In ${path.basename(projectRoot)}`, `ใน ${path.basename(projectRoot)}`)
@@ -200,26 +197,6 @@ function showMainWindow() {
   mainWindow.focus()
 }
 
-function updateTrayMenu() {
-  if (!tray) return
-  tray.setToolTip(`CodexDesk - ${discordLabels(discordActivity)}`)
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: discordLabels(discordActivity), enabled: false },
-    { type: 'separator' },
-    { label: uiText('Open CodexDesk', 'เปิด CodexDesk'), click: showMainWindow },
-    { label: uiText('Exit', 'ปิดแอป'), click: () => { isQuitting = true; app.quit() } }
-  ]))
-}
-
-function createTray() {
-  if (tray) return
-  const icon = path.join(__dirname, '..', 'build', 'icon.png')
-  tray = new Tray(icon)
-  tray.on('click', showMainWindow)
-  tray.on('double-click', showMainWindow)
-  updateTrayMenu()
-}
-
 async function stopDiscordPresence() {
   const client = discordClient
   discordClient = undefined
@@ -230,7 +207,7 @@ async function stopDiscordPresence() {
 
 async function applyDiscordPresence(settings) {
   currentAppSettings = settings
-  updateTrayMenu()
+  applyWindowTheme(settings)
   if (!settings.discordPresence || !settings.discordClientId) {
     await stopDiscordPresence()
     return
@@ -258,6 +235,16 @@ async function applyDiscordPresence(settings) {
     })
   } catch {
     await stopDiscordPresence()
+  }
+}
+
+function applyWindowTheme(settings = currentAppSettings) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const light = settings.theme === 'light' || (settings.theme === 'system' && !nativeTheme.shouldUseDarkColors)
+  const background = light ? '#f7f7f8' : settings.theme === 'dark' ? '#111113' : '#080808'
+  mainWindow.setBackgroundColor(background)
+  if (process.platform === 'win32') {
+    mainWindow.setTitleBarOverlay({ color: background, symbolColor: light ? '#252527' : '#d8d8d8', height: 44 })
   }
 }
 
@@ -355,11 +342,6 @@ function createWindow() {
 
   if (!app.isPackaged) mainWindow.loadURL('http://127.0.0.1:5173')
   else mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
-  mainWindow.on('close', event => {
-    if (isQuitting) return
-    event.preventDefault()
-    mainWindow.hide()
-  })
 }
 
 function publishUpdateState(next) {
@@ -499,7 +481,6 @@ function installDownloadedUpdate() {
     })
     installer.once('spawn', () => {
       installer.unref()
-      isQuitting = true
       setTimeout(() => app.quit(), 500)
       resolve(true)
     })
@@ -1379,7 +1360,6 @@ ipcMain.handle('codex:stop', (_, conversationId) => {
 })
 
 if (!app.requestSingleInstanceLock()) {
-  isQuitting = true
   app.quit()
 } else {
   app.on('second-instance', showMainWindow)
@@ -1387,7 +1367,6 @@ if (!app.requestSingleInstanceLock()) {
 
 app.whenReady().then(() => {
   createWindow()
-  createTray()
   setupUpdateManager()
   fs.rm(attachmentDirectory(), { recursive: true, force: true }).catch(() => {})
   readAppSettings().then(settings => {
@@ -1395,8 +1374,10 @@ app.whenReady().then(() => {
     return applyDiscordPresence(settings)
   }).catch(() => {})
 })
+nativeTheme.on('updated', () => {
+  if (currentAppSettings.theme === 'system') applyWindowTheme(currentAppSettings)
+})
 app.on('before-quit', () => {
-  isQuitting = true
   updateDownloadController?.abort()
   stopProjectWatcher()
   for (const task of codexProcesses.values()) stopProcess(task.child)
@@ -1404,12 +1385,10 @@ app.on('before-quit', () => {
   stopProcess(authProcess)
   stopUsageServer()
   void stopDiscordPresence()
-  tray?.destroy()
-  tray = undefined
   if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) powerSaveBlocker.stop(powerSaveBlockerId)
 })
 app.on('window-all-closed', () => {
-  if (isQuitting && process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin') app.quit()
 })
 app.on('activate', () => {
   showMainWindow()
