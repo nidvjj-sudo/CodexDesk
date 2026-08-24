@@ -27,6 +27,16 @@ if (!mainSource.includes("['--updated', '--force-run']") || mainSource.includes(
   throw new Error('The updater must launch the visible installer in update mode')
 }
 
+const rendererEntry = readFileSync(path.join(root, 'src', 'main.jsx'), 'utf8')
+if (rendererEntry.includes('monaco-editor') || rendererEntry.includes('MonacoEnvironment')) {
+  throw new Error('Monaco must remain lazy-loaded outside the renderer entry')
+}
+
+const appSource = readFileSync(path.join(root, 'src', 'App.jsx'), 'utf8')
+if (appSource.includes('setInterval(() => void refreshWeeklyUsage')) {
+  throw new Error('Weekly usage polling must not run continuously')
+}
+
 if (process.platform !== 'win32') process.exit(0)
 
 const candidates = [

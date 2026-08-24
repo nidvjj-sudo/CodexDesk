@@ -12,6 +12,7 @@ let authProcess
 let usageProcess
 let usageStartPromise
 let usageStartResolve
+let usageIdleTimer
 let usageMessageId = 1
 const usagePending = new Map()
 let projectWatcher
@@ -849,6 +850,8 @@ function normalizeWeeklyUsage(response = {}) {
 }
 
 function stopUsageServer() {
+  clearTimeout(usageIdleTimer)
+  usageIdleTimer = null
   const child = usageProcess
   usageProcess = null
   usageStartPromise = null
@@ -863,6 +866,8 @@ function stopUsageServer() {
 }
 
 function startUsageServer() {
+  clearTimeout(usageIdleTimer)
+  usageIdleTimer = null
   if (usageStartPromise) return usageStartPromise
   if (usageProcess?.stdin?.writable) return Promise.resolve(true)
   let runtime
@@ -933,12 +938,17 @@ function startUsageServer() {
 async function readCodexWeeklyUsage() {
   if (!await startUsageServer() || !usageProcess?.stdin?.writable) return { status: 'unavailable' }
   return new Promise(resolve => {
+    const finish = result => {
+      clearTimeout(usageIdleTimer)
+      usageIdleTimer = usageProcess ? setTimeout(stopUsageServer, 10000) : null
+      resolve(result)
+    }
     const id = ++usageMessageId
     const timeout = setTimeout(() => {
       usagePending.delete(id)
-      resolve({ status: 'unavailable' })
+      finish({ status: 'unavailable' })
     }, 10000)
-    usagePending.set(id, { resolve, timeout })
+    usagePending.set(id, { resolve: finish, timeout })
     usageProcess.stdin.write(`${JSON.stringify({ id, method: 'account/rateLimits/read', params: null })}\n`)
   })
 }

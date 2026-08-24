@@ -83,6 +83,7 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .save-button:hover:not(:disabled) { background: #171719; color: #fff; }
 .save-button:disabled { opacity: .28; cursor: default; }
 .editor-wrap { min-width: 0; min-height: 0; overflow: hidden; }
+.editor-loading { height: 100%; display: grid; place-items: center; color: #707076; font-size: 10px; }
 .monaco-editor, .monaco-editor-background, .monaco-editor .margin { background-color: #09090a !important; }
 .bottom-panel { min-width: 0; min-height: 0; overflow: hidden; border-top: 1px solid var(--line); background: #0a0a0b; }
 .diff-heading { height: 36px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border-bottom: 1px solid var(--line-soft); color: #aaaab0; font-size: 9.5px; }
@@ -618,6 +619,10 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .notice-toast p { max-height: 150px; margin: 0; overflow: auto; color: #d2d2d5; font-size: 10.5px; line-height: 1.55; white-space: pre-wrap; }
 .notice-toast button { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #77777d; cursor: pointer; }
 .notice-toast button:hover { background: #29292d; color: #eeeeef; }
+
+.titlebar, .composer, .activity-drawer, .modal-backdrop, .notice-toast { backdrop-filter: none; }
+.message { content-visibility: auto; contain-intrinsic-size: auto 82px; }
+.file-tree, .conversation, .activity-list, .history-list { contain: layout paint; }
 
 @media (max-width: 680px) {
   .notice-stack { top: 54px; right: 9px; width: calc(100vw - 18px); }

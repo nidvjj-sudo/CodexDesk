@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import Editor from '@monaco-editor/react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Bot, Brain, Check, ChevronDown, ChevronRight, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, Globe2, History, Image as ImageIcon, Info, ListTodo, LockKeyhole, LogIn, LogOut, Monitor, Palette, Paperclip, Plug, Plus, Power, RefreshCw, Save, Search, Send, Server, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal, SquareTerminal, Trash2, Undo2, UserRound, Video, X } from 'lucide-react'
 
 const api = window.codexDesk
+const CodeEditor = lazy(() => import('./CodeEditor'))
 const CHAT_COMMANDS = [
   { name: '/help', description: 'ดูคำสั่งทั้งหมด', descriptionEn: 'Show all commands' },
   { name: '/new', description: 'เริ่มแชทใหม่ในโฟลเดอร์นี้', descriptionEn: 'Start a new chat' },
@@ -399,7 +399,7 @@ function App() {
   useEffect(() => {
     api.authStatus().then(value => {
       setAuthenticated(value.authenticated)
-      if (!value.authenticated) startLogin()
+      if (!value.authenticated) setAuthState('idle')
     })
   }, [])
 
@@ -410,8 +410,7 @@ function App() {
       return undefined
     }
     void refreshWeeklyUsage()
-    const timer = window.setInterval(() => void refreshWeeklyUsage(false), 1000)
-    return () => window.clearInterval(timer)
+    return undefined
   }, [authenticated])
 
   useEffect(() => api.onCodexEvent(event => {
@@ -1252,7 +1251,7 @@ function App() {
       <aside className={`artifact-panel ${artifactView ? 'open' : ''}`}>
         <div className="artifact-heading"><div className="artifact-tabs"><button className={artifactView === 'files' ? 'active' : ''} onClick={() => setArtifactView('files')}><FolderOpen size={13} />{t('Files', 'ไฟล์')}</button>{currentFile && <button className={artifactView === 'file' ? 'active' : ''} onClick={() => setArtifactView('file')}><Code2 size={13} />{currentFile.name}</button>}<button className={artifactView === 'diff' ? 'active' : ''} onClick={() => void loadDiff()}><GitCompare size={13} />{t('Changes', 'การเปลี่ยนแปลง')}</button>{responseArtifact && <button className={artifactView === 'response' ? 'active' : ''} onClick={() => setArtifactView('response')}>{responseArtifact.type === 'code' ? <Code2 size={13} /> : <File size={13} />}{responseArtifact.type === 'code' ? 'Code' : 'Text'}</button>}</div><button className="artifact-close" onClick={() => setArtifactView(null)} title={t('Close panel', 'ปิดแผง')}><X size={15} /></button></div>
         {artifactView === 'files' && <div className="artifact-files"><div className="project-label"><FolderOpen size={13} /><span>{project?.name || t('No project open', 'ยังไม่ได้เปิดโปรเจกต์')}</span><button onClick={refreshFiles}><RefreshCw size={13} /></button></div><label className="file-search"><Search size={13} /><input value={fileQuery} onChange={event => setFileQuery(event.target.value)} placeholder={t('Search files', 'ค้นหาไฟล์')} /></label><div className="file-tree">{visibleFiles.map(node => <FileNode key={node.path} node={node} onOpen={openFile} />)}{visibleFiles.length === 0 && <div className="file-empty">{project ? t('No files found', 'ไม่พบไฟล์') : t('Open a project to browse files', 'เปิดโปรเจกต์เพื่อดูไฟล์')}</div>}</div></div>}
-        {artifactView === 'file' && currentFile && <div className="artifact-editor"><div className="artifact-toolbar"><span><File size={13} />{currentFile.name}</span><button disabled={!dirty} onClick={saveFile}><Save size={13} />{t('Save', 'บันทึก')}</button></div><div className="editor-wrap"><Editor value={content} onChange={value => setContent(value ?? '')} onMount={mountEditor} language={language} theme={lightTheme ? 'vs' : 'vs-dark'} options={{ minimap: { enabled: true }, fontFamily: 'Cascadia Mono, Consolas, monospace', fontSize: 13, padding: { top: 16 }, smoothScrolling: true, cursorSmoothCaretAnimation: 'on', renderLineHighlight: 'all', wordWrap: 'off', automaticLayout: true }} /></div><div className="editor-status"><span>{language.toUpperCase()}</span><span>{dirty ? t('Unsaved', 'ยังไม่ได้บันทึก') : t('Saved', 'บันทึกแล้ว')}</span><span>UTF-8</span></div></div>}
+        {artifactView === 'file' && currentFile && <div className="artifact-editor"><div className="artifact-toolbar"><span><File size={13} />{currentFile.name}</span><button disabled={!dirty} onClick={saveFile}><Save size={13} />{t('Save', 'บันทึก')}</button></div><div className="editor-wrap"><Suspense fallback={<div className="editor-loading">{t('Loading editor…', 'กำลังโหลดตัวแก้โค้ด…')}</div>}><CodeEditor value={content} onChange={value => setContent(value ?? '')} onMount={mountEditor} language={language} theme={lightTheme ? 'vs' : 'vs-dark'} options={{ minimap: { enabled: false }, stickyScroll: { enabled: false }, bracketPairColorization: { enabled: false }, overviewRulerLanes: 0, hideCursorInOverviewRuler: true, fontFamily: 'Cascadia Mono, Consolas, monospace', fontSize: 13, padding: { top: 14 }, smoothScrolling: false, cursorSmoothCaretAnimation: 'off', renderLineHighlight: 'line', wordWrap: 'off', automaticLayout: true }} /></Suspense></div><div className="editor-status"><span>{language.toUpperCase()}</span><span>{dirty ? t('Unsaved', 'ยังไม่ได้บันทึก') : t('Saved', 'บันทึกแล้ว')}</span><span>UTF-8</span></div></div>}
         {artifactView === 'diff' && <div className="artifact-diff"><div className="artifact-toolbar"><span><GitCompare size={13} />Git Diff</span><button onClick={loadDiff}><RefreshCw size={13} />{t('Refresh', 'รีเฟรช')}</button></div><pre>{diff || t('Codex changes will appear here', 'การเปลี่ยนแปลงของ Codex จะแสดงที่นี่')}</pre></div>}
         {artifactView === 'response' && responseArtifact && <div className="response-artifact"><div className="artifact-toolbar"><span>{responseArtifact.type === 'code' ? <Code2 size={13} /> : <File size={13} />}{responseArtifact.language.toUpperCase()}</span><button onClick={() => api.copyText(responseArtifact.content)}><Copy size={13} />{t('Copy', 'คัดลอก')}</button></div><pre><code>{responseArtifact.content}</code></pre></div>}
       </aside>
