@@ -85,6 +85,28 @@ function PlanCard({ compact = false, event, canDecide, onApprove, onCancel, tran
   </div>
 }
 
+function ActivityLogItem({ item, translate }) {
+  const Icon = ['file_change', 'fileChange', 'file_change_summary'].includes(item.type) ? FilePenLine
+    : ['command_execution', 'commandExecution'].includes(item.type) ? SquareTerminal
+      : ['web_search', 'webSearch'].includes(item.type) ? Globe2
+        : ['mcp_tool_call', 'mcpToolCall'].includes(item.type) ? Plug
+          : item.type === 'reasoning' ? Brain : ListTodo
+  const statusLabel = item.status === 'running' ? translate('Running', 'กำลังทำงาน') : item.status === 'failed' ? translate('Failed', 'ไม่สำเร็จ') : translate('Completed', 'เสร็จแล้ว')
+  const timestamp = item.startedAt ? new Date(item.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
+  const elapsed = item.finishedAt && item.startedAt ? Math.max(0, item.finishedAt - item.startedAt) : 0
+  const elapsedLabel = elapsed >= 1000 ? `${(elapsed / 1000).toFixed(elapsed >= 10000 ? 0 : 1)}s` : elapsed > 0 ? `${elapsed}ms` : ''
+  return <div className={`activity-item ${item.status}`}>
+    <div className="activity-icon"><Icon size={12} /></div>
+    <div className="activity-body">
+      <div className="activity-title"><strong>{item.title}</strong>{(item.additions > 0 || item.deletions > 0) && <span><b>+{item.additions}</b><em>-{item.deletions}</em></span>}</div>
+      <div className="activity-meta"><span className="activity-state">{item.status === 'running' && <i />}{statusLabel}</span>{timestamp && <time>{timestamp}</time>}{elapsedLabel && <span>{elapsedLabel}</span>}{item.exitCode !== null && item.exitCode !== undefined && <span>exit {item.exitCode}</span>}</div>
+      {item.changes?.length > 0 && <div className="file-change-list">{item.changes.map((change, index) => <div className="file-change-row" key={`${change.path}-${index}`}><FilePenLine size={12} /><span title={change.path}>{change.path}</span>{(change.additions > 0 || change.deletions > 0) && <><b>+{change.additions}</b><em>-{change.deletions}</em></>}</div>)}</div>}
+      {item.command && <pre className="activity-command">$ {item.command}</pre>}
+      {item.output && <pre className="activity-output">{item.output}</pre>}
+    </div>
+  </div>
+}
+
 function SettingsModal({ authenticated, currentVersion, draft, onChange, onClearData, onClose, onOpenMcp, onSave, onSignOut, onUpdate, saving, section, setSection }) {
   const l = (english, thai) => draft.language === 'th' ? thai : english
   const navigation = [
@@ -139,7 +161,26 @@ function normalizeChatMarkdown(value) {
     .replace(/\(([^)\n]+)\)\[(https:\/\/[^\]\s]+)\]/gi, '[$1]($2)')
 }
 
-function MarkdownMessage({ onOpenFile, text }) {
+function markdownNodeText(value) {
+  if (typeof value === 'string' || typeof value === 'number') return String(value)
+  if (Array.isArray(value)) return value.map(markdownNodeText).join('')
+  return value?.props ? markdownNodeText(value.props.children) : ''
+}
+
+function MarkdownCopyBox({ children, translate }) {
+  const [copied, setCopied] = useState(false)
+  const content = markdownNodeText(children).replace(/\n$/, '')
+  const className = Array.isArray(children) ? children[0]?.props?.className : children?.props?.className
+  const language = String(className || '').replace(/^language-/, '') || 'text'
+  const copy = async () => {
+    await api.copyText(content)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1400)
+  }
+  return <div className="markdown-copy-box"><div className="markdown-box-heading"><span>{['text', 'txt', 'plaintext', 'markdown', 'md'].includes(language.toLowerCase()) ? 'TEXT' : language.toUpperCase()}</span><button onClick={() => void copy()}><Copy size={11} />{copied ? translate('Copied', 'คัดลอกแล้ว') : translate('Copy', 'คัดลอก')}</button></div><pre>{children}</pre></div>
+}
+
+function MarkdownMessage({ onOpenFile, text, translate }) {
   const openLink = href => {
     if (!href) return
     if (/^https:\/\//i.test(href)) void api.openLink(href)
@@ -148,7 +189,8 @@ function MarkdownMessage({ onOpenFile, text }) {
   return <ReactMarkdown
     remarkPlugins={[remarkGfm]}
     components={{
-      a: ({ href, children }) => <button className="markdown-link" onClick={() => openLink(href)}>{children}</button>
+      a: ({ href, children }) => <button className="markdown-link" onClick={() => openLink(href)}>{children}</button>,
+      pre: ({ children }) => <MarkdownCopyBox translate={translate}>{children}</MarkdownCopyBox>
     }}
   >{normalizeChatMarkdown(text)}</ReactMarkdown>
 }
@@ -161,12 +203,11 @@ function extractResponseArtifact(events) {
     if (!blocks.length) return null
     const block = blocks.at(-1)
     const language = block[1].trim().toLowerCase() || 'plaintext'
-    if (['text', 'txt', 'markdown', 'md'].includes(language)) return null
     return {
       id: `${event.id || index}-${blocks.length}`,
       content: block[2].replace(/\n$/, ''),
       language,
-      type: 'code'
+      type: ['text', 'txt', 'plaintext', 'markdown', 'md'].includes(language) ? 'text' : 'code'
     }
   }
   return null
@@ -300,6 +341,10 @@ function App() {
   const [conversations, setConversations] = useState([])
   const [historyOpen, setHistoryOpen] = useState(false)
   const [artifactView, setArtifactView] = useState(null)
+  const [artifactWidth, setArtifactWidth] = useState(() => {
+    const saved = Number.parseInt(window.localStorage.getItem('codexdesk-artifact-width') || '', 10)
+    return Number.isFinite(saved) ? Math.max(320, Math.min(900, saved)) : 480
+  })
   const [mcpOpen, setMcpOpen] = useState(false)
   const [mcpServers, setMcpServers] = useState([])
   const [mcpBusy, setMcpBusy] = useState(false)
@@ -362,6 +407,15 @@ function App() {
     const update = event => setSystemLight(event.matches)
     media.addEventListener?.('change', update)
     return () => media.removeEventListener?.('change', update)
+  }, [])
+
+  useEffect(() => {
+    const fit = () => {
+      if (window.innerWidth > 900) setArtifactWidth(current => clampArtifactWidth(current))
+    }
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
   }, [])
 
   useEffect(() => {
@@ -855,7 +909,6 @@ function App() {
     statsRefreshByChat.current.add(chatId)
     try {
       const stats = await api.undoStats(task.snapshotId)
-      if (chatId !== conversationIdRef.current) return
       const item = {
         id: `stats-${task.id}`,
         type: 'file_change_summary',
@@ -864,9 +917,11 @@ function App() {
         status: 'completed',
         changes: stats.changes,
         additions: stats.additions,
-        deletions: stats.deletions
+        deletions: stats.deletions,
+        startedAt: Date.now(),
+        finishedAt: Date.now()
       }
-      setActivity(items => {
+      setChatActivity(chatId, items => {
         const index = items.findIndex(entry => entry.id === item.id)
         if (index < 0) return [...items.slice(-99), item]
         return items.map((entry, position) => position === index ? item : entry)
@@ -896,7 +951,7 @@ function App() {
           additions.push({ kind: 'agent_message', text: event.item.text })
         }
         if (['plan', 'plan_update', 'planUpdate', 'todo_list', 'todoList'].includes(event.item?.type)) applyCodexPlanUpdate(chatId, event.item)
-        if (chatId === conversationIdRef.current && event.item && event.item.type !== 'agent_message') updateActivity(event)
+        if (event.item && event.item.type !== 'agent_message') updateActivity(event, chatId)
         if (event.type === 'item.completed' && ['file_change', 'fileChange'].includes(event.item?.type)) void refreshTaskStats(chatId)
         if (event.type === 'error') {
           additions.push({ kind: 'error', text: event.message || t('Codex could not complete the task.', 'Codex ทำงานไม่สำเร็จ') })
@@ -910,20 +965,63 @@ function App() {
     appendChatEvents(chatId, additions, nextSessionId)
   }
 
-  function updateActivity(event) {
+  function setChatActivity(chatId, updater) {
+    if (chatId === conversationIdRef.current) {
+      setActivity(items => {
+        const next = updater(items)
+        activitiesByChat.current.set(chatId, next)
+        return next
+      })
+      return
+    }
+    const current = activitiesByChat.current.get(chatId) || []
+    activitiesByChat.current.set(chatId, updater(current))
+  }
+
+  function activityCommandTitle(command, running) {
+    const value = String(command || '').replace(/\s+/g, ' ').trim()
+    const verb = (activeEn, doneEn, activeTh, doneTh) => running ? t(activeEn, activeTh) : t(doneEn, doneTh)
+    if (/\b(cat|type|sed|head|tail|Get-Content)(\.exe)?\b|\brg(\.exe)?\s+--files\b/i.test(value)) return verb('Reading project files', 'Read project files', 'กำลังอ่านไฟล์โปรเจกต์', 'อ่านไฟล์โปรเจกต์แล้ว')
+    if (/\b(rg|grep|findstr)(\.exe)?\b/i.test(value)) return verb('Searching project files', 'Searched project files', 'กำลังค้นหาในไฟล์โปรเจกต์', 'ค้นหาในไฟล์โปรเจกต์แล้ว')
+    if (/\b(npm|pnpm|yarn)(\.cmd|\.exe)?\s+(run\s+)?(test|build|lint)|\b(pytest|vitest|jest)(\.exe)?\b/i.test(value)) return verb('Running project checks', 'Project checks finished', 'กำลังตรวจสอบโปรเจกต์', 'ตรวจสอบโปรเจกต์เสร็จแล้ว')
+    if (/\b(node|python|py)(\.exe)?\b.*(--check|-m\s+compileall)/i.test(value)) return verb('Checking code', 'Code check finished', 'กำลังตรวจสอบโค้ด', 'ตรวจสอบโค้ดเสร็จแล้ว')
+    if (/\bgit(\.exe)?\s+(diff|status|log)\b/i.test(value)) return verb('Inspecting Git changes', 'Inspected Git changes', 'กำลังตรวจการเปลี่ยนแปลง Git', 'ตรวจการเปลี่ยนแปลง Git แล้ว')
+    return verb('Running command', 'Command finished', 'กำลังรันคำสั่ง', 'รันคำสั่งเสร็จแล้ว')
+  }
+
+  function updateActivity(event, chatId = conversationIdRef.current) {
     const item = event.item
     if (['plan', 'plan_update', 'planUpdate', 'todo_list', 'todoList'].includes(item.type)) return
     const id = item.id || `${item.type}-${Date.now()}`
-    const labels = { reasoning: t('Thinking', 'กำลังวิเคราะห์'), file_change: t('Editing files', 'กำลังแก้ไขไฟล์'), fileChange: t('Editing files', 'กำลังแก้ไขไฟล์'), command_execution: t('Running command', 'กำลังรันคำสั่ง'), commandExecution: t('Running command', 'กำลังรันคำสั่ง'), web_search: t('Searching', 'กำลังค้นหา'), webSearch: t('Searching', 'กำลังค้นหา'), mcp_tool_call: t('Using tool', 'กำลังใช้เครื่องมือ'), mcpToolCall: t('Using tool', 'กำลังใช้เครื่องมือ') }
     const changes = ['file_change', 'fileChange'].includes(item.type) ? fileChangeDetails(item) : []
     const additions = changes.reduce((total, change) => total + change.additions, 0)
     const deletions = changes.reduce((total, change) => total + change.deletions, 0)
-    const title = changes.length > 0 ? t(`Edited ${changes.length} file${changes.length === 1 ? '' : 's'}`, `แก้ไข ${changes.length} ไฟล์`) : item.command || item.query || item.name || item.path || labels[item.type] || item.type
-    const output = item.aggregated_output || item.output || item.text || ''
-    const status = event.type === 'item.started' ? 'running' : item.status || 'completed'
-    setActivity(items => {
+    const running = ['item.started', 'item.updated'].includes(event.type)
+    const command = Array.isArray(item.command) ? item.command.join(' ') : String(item.command || '')
+    const target = changes.length === 1 ? changes[0].path : item.path || item.file_path || item.filePath || ''
+    const typeLabels = {
+      reasoning: running ? t('Thinking through the task', 'กำลังวิเคราะห์งาน') : t('Analysis finished', 'วิเคราะห์งานเสร็จแล้ว'),
+      web_search: running ? t(`Searching the web${item.query ? `: ${item.query}` : ''}`, `กำลังค้นเว็บ${item.query ? `: ${item.query}` : ''}`) : t('Web search finished', 'ค้นเว็บเสร็จแล้ว'),
+      webSearch: running ? t(`Searching the web${item.query ? `: ${item.query}` : ''}`, `กำลังค้นเว็บ${item.query ? `: ${item.query}` : ''}`) : t('Web search finished', 'ค้นเว็บเสร็จแล้ว'),
+      mcp_tool_call: running ? t(`Using ${item.name || 'MCP tool'}`, `กำลังใช้ ${item.name || 'เครื่องมือ MCP'}`) : t(`${item.name || 'MCP tool'} finished`, `${item.name || 'เครื่องมือ MCP'} ทำงานเสร็จแล้ว`),
+      mcpToolCall: running ? t(`Using ${item.name || 'MCP tool'}`, `กำลังใช้ ${item.name || 'เครื่องมือ MCP'}`) : t(`${item.name || 'MCP tool'} finished`, `${item.name || 'เครื่องมือ MCP'} ทำงานเสร็จแล้ว`)
+    }
+    let title
+    if (['file_change', 'fileChange'].includes(item.type)) {
+      title = target
+        ? running ? t(`Editing ${target}`, `กำลังแก้ไข ${target}`) : t(`Edited ${target}`, `แก้ไข ${target} แล้ว`)
+        : running ? t(`Editing ${changes.length || ''} files`.replace('  ', ' '), `กำลังแก้ไขไฟล์${changes.length ? ` ${changes.length} ไฟล์` : ''}`) : t(`Edited ${changes.length || ''} files`.replace('  ', ' '), `แก้ไขไฟล์${changes.length ? ` ${changes.length} ไฟล์` : ''}แล้ว`)
+    } else if (['command_execution', 'commandExecution'].includes(item.type)) title = activityCommandTitle(command, running)
+    else title = typeLabels[item.type] || item.name || item.path || item.type
+    const output = item.aggregated_output || item.output || item.text || (item.arguments ? JSON.stringify(item.arguments, null, 2) : '')
+    const exitCode = item.exit_code ?? item.exitCode ?? null
+    const failed = event.type === 'item.failed' || ['failed', 'error'].includes(String(item.status || '').toLowerCase()) || (exitCode !== null && Number(exitCode) !== 0)
+    const status = running ? 'running' : failed ? 'failed' : 'completed'
+    const now = Date.now()
+    setChatActivity(chatId, items => {
       const index = items.findIndex(value => value.id === id)
-      const next = { id, type: item.type, title: String(title), output: String(output).slice(-1200), status, changes, additions, deletions }
+      const previous = index >= 0 ? items[index] : null
+      const next = { id, type: item.type, title: String(title), command: command.slice(0, 1200), output: String(output).slice(-4000), status, changes, additions, deletions, exitCode, startedAt: previous?.startedAt || now, finishedAt: status === 'running' ? null : now }
       if (index < 0) return [...items.slice(-99), next]
       return items.map((value, position) => position === index ? { ...value, ...next } : value)
     })
@@ -967,8 +1065,8 @@ function App() {
     setChatRunning(chatId, true)
     if (chatId === conversationIdRef.current) {
       setEvents(items => items.map(event => event.id === task.id ? { ...event, queued: false } : event))
-      setActivity(items => [...items.slice(-99), { id: `task-${task.id}`, type: 'task', title: task.text, output: '', status: 'running' }])
     }
+    setChatActivity(chatId, items => [...items.slice(-99), { id: `task-${task.id}`, type: 'task', title: task.text, output: '', status: 'running', startedAt: Date.now(), finishedAt: null }])
     let completed = false
     let snapshot = null
     try {
@@ -986,7 +1084,7 @@ function App() {
     } finally {
       if (task.attachments?.length) await api.removeAttachments(task.attachments).catch(() => {})
     }
-    if (chatId === conversationIdRef.current) setActivity(items => items.map(item => item.id === `task-${task.id}` ? { ...item, status: completed ? 'completed' : 'failed' } : item))
+    setChatActivity(chatId, items => items.map(item => item.id === `task-${task.id}` ? { ...item, status: completed ? 'completed' : 'failed', finishedAt: Date.now() } : item))
     activeTasksByChat.current.delete(chatId)
     if (task.planEventId) {
       updatePlanEvent(chatId, event => ({
@@ -1381,6 +1479,41 @@ function App() {
     }
   }
 
+  function clampArtifactWidth(value) {
+    const sidebarWidth = window.innerWidth > 1180 ? 270 : 230
+    const maximum = Math.max(320, window.innerWidth - sidebarWidth - 360)
+    return Math.max(320, Math.min(maximum, Math.round(value)))
+  }
+
+  function resizeArtifactBy(delta) {
+    setArtifactWidth(current => {
+      const next = clampArtifactWidth(current + delta)
+      window.localStorage.setItem('codexdesk-artifact-width', String(next))
+      return next
+    })
+  }
+
+  function startArtifactResize(event) {
+    if (event.button !== 0 || window.innerWidth <= 900) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = artifactWidth
+    const move = pointerEvent => setArtifactWidth(clampArtifactWidth(startWidth + startX - pointerEvent.clientX))
+    const stop = pointerEvent => {
+      const next = clampArtifactWidth(startWidth + startX - pointerEvent.clientX)
+      setArtifactWidth(next)
+      window.localStorage.setItem('codexdesk-artifact-width', String(next))
+      document.documentElement.classList.remove('resizing-artifact')
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+    }
+    document.documentElement.classList.add('resizing-artifact')
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+  }
+
   const language = useMemo(() => {
     const extension = currentFile?.name.split('.').pop()?.toLowerCase()
     return ({ js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript', py: 'python', json: 'json', html: 'html', css: 'css', cs: 'csharp', java: 'java', go: 'go', rs: 'rust', md: 'markdown', yml: 'yaml', yaml: 'yaml' })[extension] || 'plaintext'
@@ -1397,7 +1530,7 @@ function App() {
       </div>
     </header>
 
-    <main className={`workspace view-${mobileView} ${artifactView ? 'artifact-open' : ''}`}>
+    <main className={`workspace view-${mobileView} ${artifactView ? 'artifact-open' : ''}`} style={{ '--artifact-width': `${artifactWidth}px` }}>
       <aside className="chat-sidebar">
         <div className="sidebar-logo"><span><Code2 size={16} /></span><strong>CodexDesk</strong></div>
         <button className="sidebar-new" onClick={newChat}><FilePenLine size={16} /><span>{t('New chat', 'แชทใหม่')}</span><Plus size={14} /></button>
@@ -1421,6 +1554,7 @@ function App() {
       </aside>
 
       <aside className={`artifact-panel ${artifactView ? 'open' : ''}`}>
+        <div className="artifact-resizer" role="separator" aria-label={t('Resize right panel', 'ปรับขนาดแผงขวา')} aria-orientation="vertical" tabIndex={0} onPointerDown={startArtifactResize} onDoubleClick={() => resizeArtifactBy(480 - artifactWidth)} onKeyDown={event => { if (event.key === 'ArrowLeft') resizeArtifactBy(24); if (event.key === 'ArrowRight') resizeArtifactBy(-24) }} />
         <div className="artifact-heading"><div className="artifact-tabs">{currentPlan && <button className={artifactView === 'plan' ? 'active' : ''} onClick={() => setArtifactView('plan')}><ListTodo size={13} />Plan</button>}<button className={artifactView === 'files' ? 'active' : ''} onClick={() => setArtifactView('files')}><FolderOpen size={13} />{t('Files', 'ไฟล์')}</button>{currentFile && <button className={artifactView === 'file' ? 'active' : ''} onClick={() => setArtifactView('file')}><Code2 size={13} />{currentFile.name}</button>}<button className={artifactView === 'diff' ? 'active' : ''} onClick={() => void loadDiff()}><GitCompare size={13} />{t('Changes', 'การเปลี่ยนแปลง')}</button>{responseArtifact && <button className={artifactView === 'response' ? 'active' : ''} onClick={() => setArtifactView('response')}>{responseArtifact.type === 'code' ? <Code2 size={13} /> : <File size={13} />}{responseArtifact.type === 'code' ? 'Code' : 'Text'}</button>}</div><button className="artifact-close" onClick={() => setArtifactView(null)} title={t('Close panel', 'ปิดแผง')}><X size={15} /></button></div>
         {artifactView === 'plan' && currentPlan && <div className="artifact-plan"><PlanCard event={currentPlan} canDecide={pendingPlansByChat.current.get(conversationId)?.planEventId === currentPlan.id} onApprove={() => approvePlan(conversationId, currentPlan.id)} onCancel={() => cancelPlan(conversationId, currentPlan.id)} translate={t} /></div>}
         {artifactView === 'files' && <div className="artifact-files"><div className="project-label"><FolderOpen size={13} /><span>{project?.name || t('No project open', 'ยังไม่ได้เปิดโปรเจกต์')}</span><button onClick={refreshFiles}><RefreshCw size={13} /></button></div><label className="file-search"><Search size={13} /><input value={fileQuery} onChange={event => setFileQuery(event.target.value)} placeholder={t('Search files', 'ค้นหาไฟล์')} /></label><div className="file-tree">{visibleFiles.map(node => <FileNode key={node.path} node={node} onOpen={openFile} />)}{visibleFiles.length === 0 && <div className="file-empty">{project ? t('No files found', 'ไม่พบไฟล์') : t('Open a project to browse files', 'เปิดโปรเจกต์เพื่อดูไฟล์')}</div>}</div></div>}
@@ -1434,7 +1568,7 @@ function App() {
         <div className="agent-meta"><span>Local workspace</span><span>{allowEdit ? 'Workspace write' : 'Read only'}</span></div>
         <div className="conversation">
           {events.length === 0 && <div className="welcome"><span className="welcome-kicker">CODEX WORKSPACE</span><div className="welcome-icon"><Bot size={22} /></div><h2>{t('What would you like to build?', 'วันนี้ต้องการสร้างอะไร')}</h2><p>{t('Ask Codex to create, inspect, or edit code. No folder is required.', 'สั่งให้ Codex สร้าง อ่าน ตรวจสอบ หรือแก้ไขงานได้โดยไม่ต้องเปิดโฟลเดอร์')}</p><div className="welcome-actions"><button onClick={() => setPrompt(t('Inspect this project and summarize improvements', 'ตรวจสอบโครงสร้างโปรเจกต์และสรุปสิ่งที่ควรปรับปรุง'))}><Search size={13} /><span>{t('Inspect project', 'ตรวจโปรเจกต์')}</span></button><button onClick={() => setPrompt(t('Find potential bugs and fix them safely', 'ค้นหาบัคที่อาจเกิดขึ้นและแก้ไขให้ปลอดภัย'))}><ShieldCheck size={13} /><span>{t('Find bugs', 'ค้นหาบัค')}</span></button><button onClick={() => setPrompt(t('Create a new project for me. Ask only for essential requirements.', 'สร้างโปรเจกต์ใหม่ให้ฉัน ถามเฉพาะข้อมูลที่จำเป็น'))}><Code2 size={13} /><span>{t('New project', 'สร้างโปรเจกต์')}</span></button></div></div>}
-          {events.filter(event => event.kind !== 'system' && event.kind !== 'plan').map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><div className="message-label"><span>{event.kind === 'user' ? event.queued ? t('You · queued', 'คุณ · อยู่ในคิว') : t('You', 'คุณ') : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title={t('Copy message', 'คัดลอกข้อความ')}><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage onOpenFile={openFileLink} text={event.text} /></div></motion.div>)}
+          {events.filter(event => event.kind !== 'system' && event.kind !== 'plan').map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><div className="message-label"><span>{event.kind === 'user' ? event.queued ? t('You · queued', 'คุณ · อยู่ในคิว') : t('You', 'คุณ') : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title={t('Copy message', 'คัดลอกข้อความ')}><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage onOpenFile={openFileLink} text={event.text} translate={t} /></div></motion.div>)}
           {running && <div className="thinking"><i /><i /><i /></div>}
           <div ref={conversationEnd} className="conversation-end" />
         </div>
@@ -1446,7 +1580,7 @@ function App() {
         <AnimatePresence>{activityOpen && <motion.div className="activity-drawer" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
           <div className="activity-heading"><div><ListTodo size={15} /><span>{t('Codex activity', 'กิจกรรมของ Codex')}</span></div><div className="activity-heading-actions"><kbd>Ctrl + O</kbd><button onClick={clearHistory} title={t('Clear chat', 'ล้างประวัติแชท')}><Trash2 size={13} /></button></div></div>
           {queue.length > 0 && <div className="queue-section"><strong>{t('Message queue', 'คิวข้อความ')} {queue.length}</strong>{queue.map((task, index) => <div className="queue-item" key={task.id}><span>{index + 1}</span><p>{task.text}</p></div>)}</div>}
-          <div className="activity-list">{activity.length === 0 ? <div className="activity-empty">{t('No activity yet', 'ยังไม่มีกิจกรรม')}</div> : activity.slice().reverse().map(item => <div className={`activity-item ${item.status}`} key={item.id}><i /><div><div className="activity-title"><strong>{item.title}</strong>{(item.additions > 0 || item.deletions > 0) && <span><b>+{item.additions}</b><em>-{item.deletions}</em></span>}</div>{item.changes?.length > 0 && <div className="file-change-list">{item.changes.map((change, index) => <div className="file-change-row" key={`${change.path}-${index}`}><FilePenLine size={12} /><span>{change.path}</span>{(change.additions > 0 || change.deletions > 0) && <><b>+{change.additions}</b><em>-{change.deletions}</em></>}</div>)}</div>}{item.output && <pre>{item.output}</pre>}</div></div>)}</div>
+          <div className="activity-list">{activity.length === 0 ? <div className="activity-empty">{t('No activity yet', 'ยังไม่มีกิจกรรม')}</div> : activity.slice().reverse().map(item => <ActivityLogItem item={item} translate={t} key={item.id} />)}</div>
         </motion.div>}</AnimatePresence>
         <div className="composer">
           {commandSuggestions.length > 0 && <div className="command-menu"><div className="command-menu-label"><Command size={12} />{t('Commands', 'คำสั่ง')}</div>{commandSuggestions.map(command => <button key={command.name} onClick={() => setPrompt(command.name === '/approval' ? '/approval ' : command.name)}><code>{command.name}</code><span>{settings.language === 'th' ? command.description : command.descriptionEn}</span></button>)}</div>}

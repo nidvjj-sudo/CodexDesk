@@ -45,6 +45,18 @@ if (!appSource.includes("['plan', 'plan_update', 'planUpdate', 'todo_list', 'tod
 if (!appSource.includes("artifactView === 'plan'") || !mainSource.includes("ipcMain.handle('undo:stats'")) {
   throw new Error('Plan panel or real file change statistics are missing')
 }
+if (!appSource.includes('startArtifactResize') || !appSource.includes("'--artifact-width'")) {
+  throw new Error('Resizable artifact panel is missing')
+}
+if (!appSource.includes('ActivityLogItem') || !appSource.includes('activityCommandTitle') || !appSource.includes('startedAt')) {
+  throw new Error('Detailed activity timeline is missing')
+}
+if (!appSource.includes('MarkdownCopyBox') || !appSource.includes("type: ['text', 'txt', 'plaintext', 'markdown', 'md'].includes(language) ? 'text' : 'code'")) {
+  throw new Error('Copyable code and text boxes are missing')
+}
+if (!mainSource.includes('remove every temporary artifact before finishing') || !mainSource.includes('Prefer editing existing project files in place')) {
+  throw new Error('Temporary artifact cleanup policy is missing')
+}
 
 if (process.platform !== 'win32') process.exit(0)
 
