@@ -54,6 +54,9 @@ if (!appSource.includes('ActivityLogItem') || !appSource.includes('activityComma
 if (!appSource.includes('MarkdownCopyBox') || !appSource.includes("type: ['text', 'txt', 'plaintext', 'markdown', 'md'].includes(language) ? 'text' : 'code'")) {
   throw new Error('Copyable code and text boxes are missing')
 }
+if (!appSource.includes('removeQueuedTask') || !appSource.includes('moveQueuedTask')) {
+  throw new Error('Queue management controls are missing')
+}
 if (!mainSource.includes('remove every temporary artifact before finishing') || !mainSource.includes('Prefer editing existing project files in place')) {
   throw new Error('Temporary artifact cleanup policy is missing')
 }

@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Bot, Brain, Check, ChevronDown, ChevronRight, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, Globe2, History, Image as ImageIcon, Info, ListTodo, LockKeyhole, LogIn, LogOut, Monitor, Palette, Paperclip, Plug, Plus, Power, RefreshCw, Save, Search, Send, Server, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal, SquareTerminal, Trash2, Undo2, UserRound, Video, X } from 'lucide-react'
+import { Bot, Brain, Check, ChevronDown, ChevronRight, ChevronUp, CircleStop, Code2, Command, Copy, Download, ExternalLink, File, FilePenLine, Folder, FolderOpen, GitCompare, Globe2, History, Image as ImageIcon, Info, ListTodo, LockKeyhole, LogIn, LogOut, Monitor, Palette, Paperclip, Plug, Plus, Power, RefreshCw, Save, Search, Send, Server, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal, SquareTerminal, Trash2, Undo2, UserRound, Video, X } from 'lucide-react'
 
 const api = window.codexDesk
 const CodeEditor = lazy(() => import('./CodeEditor'))
@@ -1110,6 +1110,31 @@ function App() {
     }
   }
 
+  function removeQueuedTask(taskId) {
+    const chatId = conversationIdRef.current
+    if (!chatId) return
+    const current = queuesByChat.current.get(chatId) || []
+    const target = current.find(task => task.id === taskId)
+    if (!target) return
+    const next = current.filter(task => task.id !== taskId)
+    queuesByChat.current.set(chatId, next)
+    setQueue(next)
+    setEvents(items => items.filter(event => event.id !== taskId))
+    if (target.attachments?.length) void api.removeAttachments(target.attachments)
+  }
+
+  function moveQueuedTask(taskId, direction) {
+    const chatId = conversationIdRef.current
+    if (!chatId) return
+    const next = [...(queuesByChat.current.get(chatId) || [])]
+    const index = next.findIndex(task => task.id === taskId)
+    const destination = index + direction
+    if (index < 0 || destination < 0 || destination >= next.length) return
+    ;[next[index], next[destination]] = [next[destination], next[index]]
+    queuesByChat.current.set(chatId, next)
+    setQueue(next)
+  }
+
   async function preparePlan(task, chatId) {
     const planEvent = {
       id: `plan-${task.id}`,
@@ -1579,7 +1604,7 @@ function App() {
         </motion.div>}</AnimatePresence>
         <AnimatePresence>{activityOpen && <motion.div className="activity-drawer" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
           <div className="activity-heading"><div><ListTodo size={15} /><span>{t('Codex activity', 'กิจกรรมของ Codex')}</span></div><div className="activity-heading-actions"><kbd>Ctrl + O</kbd><button onClick={clearHistory} title={t('Clear chat', 'ล้างประวัติแชท')}><Trash2 size={13} /></button></div></div>
-          {queue.length > 0 && <div className="queue-section"><strong>{t('Message queue', 'คิวข้อความ')} {queue.length}</strong>{queue.map((task, index) => <div className="queue-item" key={task.id}><span>{index + 1}</span><p>{task.text}</p></div>)}</div>}
+          {queue.length > 0 && <div className="queue-section"><strong>{t('Message queue', 'คิวข้อความ')} {queue.length}</strong>{queue.map((task, index) => <div className="queue-item" key={task.id}><span>{index + 1}</span><p>{task.text}</p><div className="queue-actions"><button onClick={() => moveQueuedTask(task.id, -1)} disabled={index === 0} title={t('Move up', 'เลื่อนขึ้น')}><ChevronUp size={11} /></button><button onClick={() => moveQueuedTask(task.id, 1)} disabled={index === queue.length - 1} title={t('Move down', 'เลื่อนลง')}><ChevronDown size={11} /></button><button className="remove" onClick={() => removeQueuedTask(task.id)} title={t('Remove from queue', 'ลบออกจากคิว')}><Trash2 size={11} /></button></div></div>)}</div>}
           <div className="activity-list">{activity.length === 0 ? <div className="activity-empty">{t('No activity yet', 'ยังไม่มีกิจกรรม')}</div> : activity.slice().reverse().map(item => <ActivityLogItem item={item} translate={t} key={item.id} />)}</div>
         </motion.div>}</AnimatePresence>
         <div className="composer">

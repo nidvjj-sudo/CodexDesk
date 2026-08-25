@@ -1,6 +1,6 @@
 {
   "name": "codexdesk",
-  "version": "2.9.14",
+  "version": "2.9.15",
   "private": true,
   "description": "Desktop workspace for OpenAI Codex CLI",
   "repository": {
