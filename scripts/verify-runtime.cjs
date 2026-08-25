@@ -21,6 +21,7 @@ for (const [name, width, height] of assets) {
 
 const installerScript = readFileSync(path.join(root, 'build', 'installer.nsh'), 'utf8')
 if (!installerScript.includes('${ifNot} ${isUpdated}')) throw new Error('Update-safe uninstall guard is missing')
+if (!installerScript.includes('codexdesk_keep_history') || !installerScript.includes('codexdesk_keep_settings')) throw new Error('Separate uninstall data choices are missing')
 
 const mainSource = readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
 if (!mainSource.includes("['--updated', '--force-run']") || mainSource.includes("['--updated', '/S'")) {
@@ -59,6 +60,9 @@ if (!appSource.includes('removeQueuedTask') || !appSource.includes('moveQueuedTa
 }
 if (!mainSource.includes('remove every temporary artifact before finishing') || !mainSource.includes('Prefer editing existing project files in place')) {
   throw new Error('Temporary artifact cleanup policy is missing')
+}
+if (!mainSource.includes('buildPlanProjectContext') || !mainSource.includes('do not run shell commands or tools to inspect the project again')) {
+  throw new Error('Sandbox-safe project planning context is missing')
 }
 
 if (process.platform !== 'win32') process.exit(0)

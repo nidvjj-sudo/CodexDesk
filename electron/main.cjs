@@ -823,6 +823,37 @@ async function walk(directory, depth = 0) {
   return result
 }
 
+async function buildPlanProjectContext() {
+  const files = await collectProjectFiles()
+  const visible = files.filter(file => {
+    const parts = file.relative.split(/[\\/]/)
+    const name = path.basename(file.relative).toLowerCase()
+    if (parts.some(part => part.startsWith('.') && !['.env.example', '.gitignore'].includes(part.toLowerCase()))) return false
+    if (/(^|[._-])(secret|credential|token|password|private[-_]?key)([._-]|$)/i.test(name)) return false
+    if (/^(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|.*\.lock)$/i.test(name)) return false
+    return true
+  })
+  const listed = visible.slice(0, 500).map(file => file.relative).join('\n') || '(empty project)'
+  const extensions = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.cs', '.xaml', '.java', '.kt', '.go', '.rs', '.php', '.rb', '.html', '.css', '.scss', '.json', '.toml', '.yaml', '.yml', '.md', '.txt', '.xml', '.sql', '.sh', '.cmd', '.bat'])
+  const preferred = new Set(['package.json', 'readme.md', 'pyproject.toml', 'requirements.txt', 'cargo.toml', 'go.mod', 'pom.xml', 'build.gradle', 'dockerfile', '.env.example'])
+  const candidates = visible.filter(file => extensions.has(path.extname(file.relative).toLowerCase()) || preferred.has(path.basename(file.relative).toLowerCase()))
+    .sort((left, right) => Number(preferred.has(path.basename(right.relative).toLowerCase())) - Number(preferred.has(path.basename(left.relative).toLowerCase())) || left.relative.localeCompare(right.relative))
+  const sections = []
+  let total = 0
+  for (const file of candidates.slice(0, 80)) {
+    const stat = await fs.stat(file.fullPath).catch(() => null)
+    if (!stat?.isFile() || stat.size > 96 * 1024) continue
+    const content = await fs.readFile(file.fullPath, 'utf8').catch(() => '')
+    if (!content || content.includes('\0')) continue
+    const remaining = 110000 - total
+    if (remaining <= 1000) break
+    const excerpt = content.slice(0, Math.min(content.length, remaining))
+    sections.push(`--- ${file.relative}\n${excerpt}`)
+    total += excerpt.length
+  }
+  return `PROJECT FILE LIST (read directly by CodexDesk):\n${listed}\n\nSELECTED PROJECT CONTENTS:\n${sections.join('\n\n') || '(no readable source files yet)'}`
+}
+
 function run(file, args, cwd, onData) {
   return new Promise(resolve => {
     const child = spawn(file, args, { cwd, windowsHide: true, shell: false, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -1381,6 +1412,7 @@ ipcMain.handle('codex:plan', async (_, options = {}) => {
   if (!request) throw new Error(uiText('Enter a task first.', 'กรุณาพิมพ์งานก่อน'))
   const attachments = await validateTaskAttachments(options.attachments)
   const runtime = codexRuntime()
+  const projectContext = await buildPlanProjectContext()
   const schemaPath = path.join(app.getPath('temp'), `codexdesk-plan-${randomUUID()}.json`)
   const schema = {
     type: 'object',
@@ -1395,9 +1427,13 @@ ipcMain.handle('codex:plan', async (_, options = {}) => {
   const prompt = [
     'Analyze the current project and create a concise implementation plan for the user request.',
     'Read files only. Do not edit, create, delete, install, or run commands that change state.',
+    'CodexDesk has already read the project safely and included its file list and selected contents below. Use this context and do not run shell commands or tools to inspect the project again.',
+    'Do not claim that sandbox policy prevented project inspection. If a needed file is absent from the supplied context, name that exact file or uncertainty in the summary.',
     'Return 2 to 8 concrete steps. Each step must describe a verifiable result.',
     'Use the same language as the user request.',
     attachments.length ? 'Inspect all attached images before planning.' : '',
+    '',
+    projectContext,
     '',
     'User request:',
     request

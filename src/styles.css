@@ -120,7 +120,7 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .message-label button { width: 23px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #5f5f65; opacity: 0; cursor: pointer; }
 .message:hover .message-label button { opacity: 1; }
 .message-label button:hover { background: #1a1a1d; color: #ddd; }
-.message.user { width: fit-content; max-width: 92%; margin-left: auto; padding: 10px 12px; border: 1px solid #303034; border-radius: 12px 12px 3px 12px; background: linear-gradient(145deg, #19191c, #141416); box-shadow: 0 8px 22px #0003; }
+.message.user { width: fit-content; max-width: min(72%, 680px); margin-left: auto; padding: 10px 12px; border: 1px solid #303034; border-radius: 12px 12px 3px 12px; background: linear-gradient(145deg, #19191c, #141416); box-shadow: 0 8px 22px #0003; }
 .message.user .message-label > span { color: #88888e; }
 .message.user.queued { opacity: .62; border-style: dashed; }
 .message.error .markdown { padding-left: 9px; border-left: 2px solid #69696f; }
@@ -639,6 +639,7 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
   .workspace > .agent-panel { grid-column: 2; grid-row: 1; display: grid; }
   .workspace.artifact-open > .artifact-panel { position: absolute; z-index: 12; inset: 0 0 0 220px; display: grid; box-shadow: -24px 0 60px #000b; }
   .artifact-resizer { display: none; }
+  .message.user { max-width: 86%; }
 }
 
 @media (max-width: 680px) {
