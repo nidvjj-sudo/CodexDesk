@@ -80,6 +80,7 @@ function PlanCard({ compact = false, event, canDecide, onApprove, onCancel, tran
   return <div className={`plan-card ${event.status} ${compact ? 'compact' : ''}`}>
     <div className="plan-heading"><div><ListTodo size={14} /><strong>{labels[event.status] || labels.awaiting}</strong></div><span>{event.steps?.filter(step => step.status === 'completed').length || 0}/{event.steps?.length || 0}</span></div>
     {event.summary && <p>{event.summary}</p>}
+    {event.status === 'running' && event.liveActivity && <div className="plan-live"><i /><span>{event.liveActivity}</span></div>}
     {event.status === 'generating' ? <div className="plan-generating"><i />{translate('Inspecting the project', 'กำลังตรวจโปรเจกต์')}</div> : <ol>{(event.steps || []).map((step, index) => <li className={step.status} key={`${event.id}-${index}`}><i>{step.status === 'completed' ? <Check size={11} /> : step.status === 'failed' ? <X size={11} /> : null}</i><span>{step.text}</span></li>)}</ol>}
     {event.status === 'awaiting' && canDecide && <div className="plan-actions"><button onClick={onCancel}>{translate('Cancel', 'ยกเลิก')}</button><button className="primary" onClick={onApprove}><Check size={12} />{translate('Approve and start', 'ยืนยันและเริ่มทำ')}</button></div>}
   </div>
@@ -890,17 +891,43 @@ function App() {
       const text = typeof step === 'string' ? step : step?.step || step?.text || step?.title || step?.description
       if (!text) return []
       const rawStatus = typeof step === 'string' ? 'pending' : String(step.status || step.state || '').toLowerCase()
-      const status = ['completed', 'complete', 'done'].includes(rawStatus) ? 'completed'
-        : ['in_progress', 'in-progress', 'inprogress', 'running', 'active'].includes(rawStatus) ? 'in_progress'
+      const status = ['completed', 'complete', 'done', 'finished', 'success'].includes(rawStatus) ? 'completed'
+        : ['in_progress', 'in-progress', 'inprogress', 'running', 'active', 'current', 'working', 'started', 'processing'].includes(rawStatus) ? 'in_progress'
           : ['failed', 'error'].includes(rawStatus) ? 'failed' : 'pending'
       return [{ text: String(text).trim(), status }]
     }).slice(0, 12)
   }
 
   function applyCodexPlanUpdate(chatId, item) {
-    const steps = planStepsFromItem(item)
-    if (!steps.length || !activePlanByChat.current.has(chatId)) return
-    updatePlanEvent(chatId, event => ({ ...event, status: 'running', steps }))
+    const incoming = planStepsFromItem(item)
+    const current = planStateByChat.current.get(chatId)
+    if (!incoming.length || !current || !activePlanByChat.current.has(chatId)) return
+    const hasProgress = incoming.some(step => step.status !== 'pending')
+    let steps = incoming.map((step, index) => {
+      const previous = current.steps[index]
+      const status = previous?.status === 'completed' || previous?.status === 'failed' ? previous.status : hasProgress ? step.status : previous?.status || 'pending'
+      return { ...step, status }
+    })
+    if (steps.length !== current.steps.length) {
+      steps = current.steps.map((step, index) => {
+        const match = incoming.find(candidate => candidate.text === step.text) || incoming[index]
+        const status = step.status === 'completed' || step.status === 'failed' ? step.status : hasProgress ? match?.status || step.status : step.status
+        return match ? { ...step, text: match.text || step.text, status } : step
+      })
+    }
+    let activeSeen = false
+    steps = steps.map(step => {
+      if (step.status !== 'in_progress') return step
+      if (activeSeen) return { ...step, status: 'pending' }
+      activeSeen = true
+      return step
+    })
+    if (!activeSeen && steps.some(step => step.status === 'pending')) {
+      const nextIndex = steps.findIndex(step => step.status === 'pending')
+      steps = steps.map((step, index) => index === nextIndex ? { ...step, status: 'in_progress' } : step)
+    }
+    const active = steps.find(step => step.status === 'in_progress')
+    updatePlanEvent(chatId, event => ({ ...event, status: 'running', steps, liveActivity: active ? t(`Working on: ${active.text}`, `กำลังทำ: ${active.text}`) : event.liveActivity }))
   }
 
   async function refreshTaskStats(chatId) {
@@ -1025,6 +1052,9 @@ function App() {
       if (index < 0) return [...items.slice(-99), next]
       return items.map((value, position) => position === index ? { ...value, ...next } : value)
     })
+    if (activePlanByChat.current.has(chatId)) {
+      updatePlanEvent(chatId, plan => ({ ...plan, liveActivity: String(title), liveActivityStatus: status }))
+    }
   }
 
   async function addAttachments(event) {
@@ -1090,6 +1120,8 @@ function App() {
       updatePlanEvent(chatId, event => ({
         ...event,
         status: completed ? 'completed' : 'failed',
+        liveActivity: '',
+        liveActivityStatus: completed ? 'completed' : 'failed',
         steps: event.steps.map(step => ({ ...step, status: completed ? 'completed' : step.status === 'in_progress' ? 'failed' : step.status }))
       }))
       activePlanByChat.current.delete(chatId)
@@ -1172,7 +1204,7 @@ function App() {
     pendingPlansByChat.current.delete(chatId)
     activePlanByChat.current.set(chatId, planEventId)
     const steps = planEvent.steps.map((step, index) => ({ ...step, status: index === 0 ? 'in_progress' : 'pending' }))
-    updatePlanEvent(chatId, event => ({ ...event, status: 'running', steps }))
+    updatePlanEvent(chatId, event => ({ ...event, status: 'running', steps, liveActivity: steps[0]?.text ? t(`Starting: ${steps[0].text}`, `กำลังเริ่ม: ${steps[0].text}`) : t('Starting work', 'กำลังเริ่มงาน') }))
     void executeTask({ ...pending.task, plan: steps.map(step => step.text), planEventId }, chatId)
   }
 

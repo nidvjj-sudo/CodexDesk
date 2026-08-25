@@ -133,6 +133,9 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .plan-heading strong { color: #e8e8ea; font-size: 10px; font-weight: 600; }
 .plan-heading > span { color: #77777d; font: 9px "Cascadia Mono", Consolas, monospace; }
 .plan-card > p { margin: 0; padding: 11px 12px 4px; color: #9b9ba1; font-size: 9.5px; line-height: 1.6; }
+.plan-live { min-width: 0; display: flex; align-items: center; gap: 8px; margin: 8px 12px 2px; padding: 8px 9px; border: 1px solid #2b2b30; border-radius: 7px; background: #0b0b0d; color: #b8b8bd; font-size: 8.5px; }
+.plan-live > i { width: 10px; height: 10px; flex: 0 0 auto; border: 2px solid #4d4d53; border-top-color: #e5e5e7; border-radius: 50%; animation: spin .75s linear infinite; }
+.plan-live > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plan-card ol { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 8px 12px 12px; list-style: none; }
 .plan-card li { min-height: 29px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 7px; padding: 6px 0; color: #8e8e94; font-size: 9.5px; line-height: 1.55; }
 .plan-card li > i { width: 15px; height: 15px; display: grid; place-items: center; margin-top: 0; border: 1px solid #45454b; border-radius: 50%; color: #0c0c0e; font-style: normal; }
@@ -765,6 +768,7 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .app-shell.is-light .settings-footer button.primary, .app-shell.is-light :is(.auth-primary, .update-primary, .mcp-install) { background: #242428; color: #fff; }
 .app-shell.is-light .modal-backdrop { background: #20202455; }
 .app-shell.is-light .plan-card { border-color: #d7d7da; background: #fff; }
+.app-shell.is-light .plan-live { border-color: #d9d9dd; background: #f3f3f5; color: #55555b; }
 .app-shell.is-light .plan-heading, .app-shell.is-light .plan-actions { border-color: #e4e4e7; }
 .app-shell.is-light .plan-heading strong, .app-shell.is-light .plan-card li.in_progress { color: #171719; }
 .app-shell.is-light .plan-card > p, .app-shell.is-light .plan-card li, .app-shell.is-light .plan-generating { color: #68686e; }

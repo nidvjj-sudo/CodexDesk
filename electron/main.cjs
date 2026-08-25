@@ -1516,7 +1516,7 @@ ipcMain.handle('codex:run', async (_, options) => {
     settings.customInstructions ? `Personal instructions from the user:\n${settings.customInstructions}` : '',
     'Always detect the language of the current user request and answer in that same language. If the request mixes languages, use the dominant language. This rule overrides any saved response-language preference. The application UI language must not affect the reply language.',
     approvedPlan.length ? `The user approved this plan:\n${approvedPlan.map((step, index) => `${index + 1}. ${step}`).join('\n')}` : '',
-    approvedPlan.length ? 'Follow the approved plan through completion. Emit plan updates as steps start and finish. Keep exactly one step in progress at a time and verify the final result.' : '',
+    approvedPlan.length ? 'Follow the approved plan through completion. Use the update_plan tool immediately before implementation starts, immediately after every numbered step finishes, and before starting the next step. Never batch plan updates at the end. Keep exactly one step in progress at a time and verify the final result.' : '',
     '',
     'User request:',
     options.prompt
