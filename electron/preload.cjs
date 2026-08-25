@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('codexDesk', {
   undoCreate: label => ipcRenderer.invoke('undo:create', label),
   undoList: () => ipcRenderer.invoke('undo:list'),
   undoRestore: id => ipcRenderer.invoke('undo:restore', id),
+  undoStats: id => ipcRenderer.invoke('undo:stats', id),
   gitDiff: () => ipcRenderer.invoke('git:diff'),
   authStatus: () => ipcRenderer.invoke('auth:status'),
   authStart: mode => ipcRenderer.invoke('auth:start', mode),

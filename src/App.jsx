@@ -68,7 +68,7 @@ function Toggle({ checked, onChange, disabled = false }) {
   return <button type="button" role="switch" aria-checked={checked} className={`settings-toggle ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)} disabled={disabled}><i /></button>
 }
 
-function PlanCard({ event, canDecide, onApprove, onCancel, translate }) {
+function PlanCard({ compact = false, event, canDecide, onApprove, onCancel, translate }) {
   const labels = {
     generating: translate('Creating plan', 'กำลังสร้างแผน'),
     awaiting: translate('Plan ready', 'แผนพร้อมแล้ว'),
@@ -77,7 +77,7 @@ function PlanCard({ event, canDecide, onApprove, onCancel, translate }) {
     failed: translate('Plan stopped', 'แผนหยุดทำงาน'),
     cancelled: translate('Plan cancelled', 'ยกเลิกแผนแล้ว')
   }
-  return <div className={`plan-card ${event.status}`}>
+  return <div className={`plan-card ${event.status} ${compact ? 'compact' : ''}`}>
     <div className="plan-heading"><div><ListTodo size={14} /><strong>{labels[event.status] || labels.awaiting}</strong></div><span>{event.steps?.filter(step => step.status === 'completed').length || 0}/{event.steps?.length || 0}</span></div>
     {event.summary && <p>{event.summary}</p>}
     {event.status === 'generating' ? <div className="plan-generating"><i />{translate('Inspecting the project', 'กำลังตรวจโปรเจกต์')}</div> : <ol>{(event.steps || []).map((step, index) => <li className={step.status} key={`${event.id}-${index}`}><i>{step.status === 'completed' ? <Check size={11} /> : step.status === 'failed' ? <X size={11} /> : null}</i><span>{step.text}</span></li>)}</ol>}
@@ -245,10 +245,13 @@ function diffStats(diff = '') {
 function fileChangeDetails(item) {
   return (Array.isArray(item.changes) ? item.changes : []).map(change => {
     const stats = diffStats(change.diff || change.patch || '')
+    const additions = Number(change.additions ?? change.lines_added ?? change.added_lines)
+    const deletions = Number(change.deletions ?? change.lines_deleted ?? change.deleted_lines)
     return {
       path: change.path || change.file_path || 'File',
       kind: change.kind || 'update',
-      ...stats
+      additions: Number.isFinite(additions) ? Math.max(0, additions) : stats.additions,
+      deletions: Number.isFinite(deletions) ? Math.max(0, deletions) : stats.deletions
     }
   })
 }
@@ -334,6 +337,8 @@ function App() {
   const planStateByChat = useRef(new Map())
   const pendingPlansByChat = useRef(new Map())
   const activePlanByChat = useRef(new Map())
+  const activeTasksByChat = useRef(new Map())
+  const statsRefreshByChat = useRef(new Set())
 
   const t = (english, thai) => settings.language === 'th' ? thai : english
   const lightTheme = settings.theme === 'light' || (settings.theme === 'system' && systemLight)
@@ -344,9 +349,12 @@ function App() {
   const liveActivity = activity.slice().reverse().find(item => item.status === 'running') || activity.at(-1)
   const currentTaskIndex = activity.map(item => item.type).lastIndexOf('task')
   const currentTaskActivity = currentTaskIndex >= 0 ? activity.slice(currentTaskIndex) : activity
-  const liveStats = currentTaskActivity.reduce((total, item) => ({ additions: total.additions + (item.additions || 0), deletions: total.deletions + (item.deletions || 0) }), { additions: 0, deletions: 0 })
+  const snapshotStats = currentTaskActivity.find(item => item.type === 'file_change_summary')
+  const liveStats = snapshotStats || currentTaskActivity.reduce((total, item) => ({ additions: total.additions + (item.additions || 0), deletions: total.deletions + (item.deletions || 0) }), { additions: 0, deletions: 0 })
   const visibleFiles = useMemo(() => filterFileTree(files, fileQuery), [files, fileQuery])
   const responseArtifact = useMemo(() => extractResponseArtifact(events), [events])
+  const currentPlan = events.filter(event => event.kind === 'plan').at(-1) || null
+  const currentPlanVisible = currentPlan && ['generating', 'awaiting', 'running'].includes(currentPlan.status)
 
   useEffect(() => {
     const media = window.matchMedia?.('(prefers-color-scheme: light)')
@@ -365,6 +373,10 @@ function App() {
     artifactEvent.current = responseArtifact.id
     setArtifactView('response')
   }, [responseArtifact?.id, artifactView])
+
+  useEffect(() => {
+    if (currentPlanVisible) setArtifactView('plan')
+  }, [currentPlan?.id, currentPlan?.status, currentPlanVisible])
 
   useEffect(() => {
     if (running || dirty || !project) return
@@ -837,6 +849,33 @@ function App() {
     updatePlanEvent(chatId, event => ({ ...event, status: 'running', steps }))
   }
 
+  async function refreshTaskStats(chatId) {
+    const task = activeTasksByChat.current.get(chatId)
+    if (!task?.snapshotId || statsRefreshByChat.current.has(chatId)) return
+    statsRefreshByChat.current.add(chatId)
+    try {
+      const stats = await api.undoStats(task.snapshotId)
+      if (chatId !== conversationIdRef.current) return
+      const item = {
+        id: `stats-${task.id}`,
+        type: 'file_change_summary',
+        title: t(`Changed ${stats.changes.length} file${stats.changes.length === 1 ? '' : 's'}`, `เปลี่ยนแปลง ${stats.changes.length} ไฟล์`),
+        output: '',
+        status: 'completed',
+        changes: stats.changes,
+        additions: stats.additions,
+        deletions: stats.deletions
+      }
+      setActivity(items => {
+        const index = items.findIndex(entry => entry.id === item.id)
+        if (index < 0) return [...items.slice(-99), item]
+        return items.map((entry, position) => position === index ? item : entry)
+      })
+    } catch {} finally {
+      statsRefreshByChat.current.delete(chatId)
+    }
+  }
+
   function parseCodexOutput(raw, flush = false, chatId = conversationIdRef.current) {
     if (!chatId) return
     const buffered = (codexBuffers.current.get(chatId) || '') + raw
@@ -858,6 +897,7 @@ function App() {
         }
         if (['plan', 'plan_update', 'planUpdate', 'todo_list', 'todoList'].includes(event.item?.type)) applyCodexPlanUpdate(chatId, event.item)
         if (chatId === conversationIdRef.current && event.item && event.item.type !== 'agent_message') updateActivity(event)
+        if (event.type === 'item.completed' && ['file_change', 'fileChange'].includes(event.item?.type)) void refreshTaskStats(chatId)
         if (event.type === 'error') {
           additions.push({ kind: 'error', text: event.message || t('Codex could not complete the task.', 'Codex ทำงานไม่สำเร็จ') })
         }
@@ -930,20 +970,24 @@ function App() {
       setActivity(items => [...items.slice(-99), { id: `task-${task.id}`, type: 'task', title: task.text, output: '', status: 'running' }])
     }
     let completed = false
+    let snapshot = null
     try {
       if (task.allowEdit) {
-        const snapshot = await api.undoCreate(task.text)
+        snapshot = await api.undoCreate(task.text)
         setUndoStack(items => [snapshot, ...items].slice(0, 10))
+        activeTasksByChat.current.set(chatId, { id: task.id, snapshotId: snapshot.id })
       }
       const result = await api.codexRun({ conversationId: chatId, prompt: task.text, allowEdit: task.allowEdit, sessionId: sessionsByChat.current.get(chatId) || null, attachments: task.attachments, plan: task.plan || [] })
       completed = result.code === 0
       await refreshFiles()
+      if (snapshot) await refreshTaskStats(chatId)
     } catch (error) {
       appendChatEvents(chatId, [{ kind: 'error', text: error.message }])
     } finally {
       if (task.attachments?.length) await api.removeAttachments(task.attachments).catch(() => {})
     }
     if (chatId === conversationIdRef.current) setActivity(items => items.map(item => item.id === `task-${task.id}` ? { ...item, status: completed ? 'completed' : 'failed' } : item))
+    activeTasksByChat.current.delete(chatId)
     if (task.planEventId) {
       updatePlanEvent(chatId, event => ({
         ...event,
@@ -988,7 +1032,8 @@ function App() {
       pendingPlansByChat.current.set(chatId, { task, planEventId: ready.id })
       if (chatId === conversationIdRef.current) setEvents(items => items.map(event => event.id === ready.id ? ready : event))
       else await api.historyUpdateEvent({ conversationId: chatId, event: ready })
-      setChatRunning(chatId, false)
+      if (task.autoApprove) approvePlan(chatId, ready.id)
+      else setChatRunning(chatId, false)
     } catch (error) {
       updatePlanEvent(chatId, event => ({ ...event, status: 'failed', summary: error.message }))
       if (task.attachments?.length) await api.removeAttachments(task.attachments).catch(() => {})
@@ -1038,7 +1083,7 @@ function App() {
     const attachmentPaths = submitted.flatMap(item => item.paths)
     const chatId = conversationIdRef.current
     if (!chatId) return
-    const task = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text: request, allowEdit, attachments: attachmentPaths, needsPlan: approvalMode === 'ask' }
+    const task = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text: request, allowEdit, attachments: attachmentPaths, needsPlan: true, autoApprove: approvalMode === 'auto' }
     setPrompt('')
     setAttachments([])
     submitted.forEach(item => URL.revokeObjectURL(item.preview))
@@ -1376,7 +1421,8 @@ function App() {
       </aside>
 
       <aside className={`artifact-panel ${artifactView ? 'open' : ''}`}>
-        <div className="artifact-heading"><div className="artifact-tabs"><button className={artifactView === 'files' ? 'active' : ''} onClick={() => setArtifactView('files')}><FolderOpen size={13} />{t('Files', 'ไฟล์')}</button>{currentFile && <button className={artifactView === 'file' ? 'active' : ''} onClick={() => setArtifactView('file')}><Code2 size={13} />{currentFile.name}</button>}<button className={artifactView === 'diff' ? 'active' : ''} onClick={() => void loadDiff()}><GitCompare size={13} />{t('Changes', 'การเปลี่ยนแปลง')}</button>{responseArtifact && <button className={artifactView === 'response' ? 'active' : ''} onClick={() => setArtifactView('response')}>{responseArtifact.type === 'code' ? <Code2 size={13} /> : <File size={13} />}{responseArtifact.type === 'code' ? 'Code' : 'Text'}</button>}</div><button className="artifact-close" onClick={() => setArtifactView(null)} title={t('Close panel', 'ปิดแผง')}><X size={15} /></button></div>
+        <div className="artifact-heading"><div className="artifact-tabs">{currentPlan && <button className={artifactView === 'plan' ? 'active' : ''} onClick={() => setArtifactView('plan')}><ListTodo size={13} />Plan</button>}<button className={artifactView === 'files' ? 'active' : ''} onClick={() => setArtifactView('files')}><FolderOpen size={13} />{t('Files', 'ไฟล์')}</button>{currentFile && <button className={artifactView === 'file' ? 'active' : ''} onClick={() => setArtifactView('file')}><Code2 size={13} />{currentFile.name}</button>}<button className={artifactView === 'diff' ? 'active' : ''} onClick={() => void loadDiff()}><GitCompare size={13} />{t('Changes', 'การเปลี่ยนแปลง')}</button>{responseArtifact && <button className={artifactView === 'response' ? 'active' : ''} onClick={() => setArtifactView('response')}>{responseArtifact.type === 'code' ? <Code2 size={13} /> : <File size={13} />}{responseArtifact.type === 'code' ? 'Code' : 'Text'}</button>}</div><button className="artifact-close" onClick={() => setArtifactView(null)} title={t('Close panel', 'ปิดแผง')}><X size={15} /></button></div>
+        {artifactView === 'plan' && currentPlan && <div className="artifact-plan"><PlanCard event={currentPlan} canDecide={pendingPlansByChat.current.get(conversationId)?.planEventId === currentPlan.id} onApprove={() => approvePlan(conversationId, currentPlan.id)} onCancel={() => cancelPlan(conversationId, currentPlan.id)} translate={t} /></div>}
         {artifactView === 'files' && <div className="artifact-files"><div className="project-label"><FolderOpen size={13} /><span>{project?.name || t('No project open', 'ยังไม่ได้เปิดโปรเจกต์')}</span><button onClick={refreshFiles}><RefreshCw size={13} /></button></div><label className="file-search"><Search size={13} /><input value={fileQuery} onChange={event => setFileQuery(event.target.value)} placeholder={t('Search files', 'ค้นหาไฟล์')} /></label><div className="file-tree">{visibleFiles.map(node => <FileNode key={node.path} node={node} onOpen={openFile} />)}{visibleFiles.length === 0 && <div className="file-empty">{project ? t('No files found', 'ไม่พบไฟล์') : t('Open a project to browse files', 'เปิดโปรเจกต์เพื่อดูไฟล์')}</div>}</div></div>}
         {artifactView === 'file' && currentFile && <div className="artifact-editor"><div className="artifact-toolbar"><span><File size={13} />{currentFile.name}</span><button disabled={!dirty} onClick={saveFile}><Save size={13} />{t('Save', 'บันทึก')}</button></div><div className="editor-wrap"><Suspense fallback={<div className="editor-loading">{t('Loading editor…', 'กำลังโหลดตัวแก้โค้ด…')}</div>}><CodeEditor value={content} onChange={value => setContent(value ?? '')} onMount={mountEditor} language={language} theme={lightTheme ? 'vs' : 'vs-dark'} options={{ minimap: { enabled: false }, stickyScroll: { enabled: false }, bracketPairColorization: { enabled: false }, overviewRulerLanes: 0, hideCursorInOverviewRuler: true, fontFamily: 'Cascadia Mono, Consolas, monospace', fontSize: 13, padding: { top: 14 }, smoothScrolling: false, cursorSmoothCaretAnimation: 'off', renderLineHighlight: 'line', wordWrap: 'off', automaticLayout: true }} /></Suspense></div><div className="editor-status"><span>{language.toUpperCase()}</span><span>{dirty ? t('Unsaved', 'ยังไม่ได้บันทึก') : t('Saved', 'บันทึกแล้ว')}</span><span>UTF-8</span></div></div>}
         {artifactView === 'diff' && <div className="artifact-diff"><div className="artifact-toolbar"><span><GitCompare size={13} />Git Diff</span><button onClick={loadDiff}><RefreshCw size={13} />{t('Refresh', 'รีเฟรช')}</button></div><pre>{diff || t('Codex changes will appear here', 'การเปลี่ยนแปลงของ Codex จะแสดงที่นี่')}</pre></div>}
@@ -1388,7 +1434,7 @@ function App() {
         <div className="agent-meta"><span>Local workspace</span><span>{allowEdit ? 'Workspace write' : 'Read only'}</span></div>
         <div className="conversation">
           {events.length === 0 && <div className="welcome"><span className="welcome-kicker">CODEX WORKSPACE</span><div className="welcome-icon"><Bot size={22} /></div><h2>{t('What would you like to build?', 'วันนี้ต้องการสร้างอะไร')}</h2><p>{t('Ask Codex to create, inspect, or edit code. No folder is required.', 'สั่งให้ Codex สร้าง อ่าน ตรวจสอบ หรือแก้ไขงานได้โดยไม่ต้องเปิดโฟลเดอร์')}</p><div className="welcome-actions"><button onClick={() => setPrompt(t('Inspect this project and summarize improvements', 'ตรวจสอบโครงสร้างโปรเจกต์และสรุปสิ่งที่ควรปรับปรุง'))}><Search size={13} /><span>{t('Inspect project', 'ตรวจโปรเจกต์')}</span></button><button onClick={() => setPrompt(t('Find potential bugs and fix them safely', 'ค้นหาบัคที่อาจเกิดขึ้นและแก้ไขให้ปลอดภัย'))}><ShieldCheck size={13} /><span>{t('Find bugs', 'ค้นหาบัค')}</span></button><button onClick={() => setPrompt(t('Create a new project for me. Ask only for essential requirements.', 'สร้างโปรเจกต์ใหม่ให้ฉัน ถามเฉพาะข้อมูลที่จำเป็น'))}><Code2 size={13} /><span>{t('New project', 'สร้างโปรเจกต์')}</span></button></div></div>}
-          {events.filter(event => event.kind !== 'system').map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}>{event.kind === 'plan' ? <PlanCard event={event} canDecide={pendingPlansByChat.current.get(conversationId)?.planEventId === event.id} onApprove={() => approvePlan(conversationId, event.id)} onCancel={() => cancelPlan(conversationId, event.id)} translate={t} /> : <><div className="message-label"><span>{event.kind === 'user' ? event.queued ? t('You · queued', 'คุณ · อยู่ในคิว') : t('You', 'คุณ') : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title={t('Copy message', 'คัดลอกข้อความ')}><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage onOpenFile={openFileLink} text={event.text} /></div></>}</motion.div>)}
+          {events.filter(event => event.kind !== 'system' && event.kind !== 'plan').map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><div className="message-label"><span>{event.kind === 'user' ? event.queued ? t('You · queued', 'คุณ · อยู่ในคิว') : t('You', 'คุณ') : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title={t('Copy message', 'คัดลอกข้อความ')}><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage onOpenFile={openFileLink} text={event.text} /></div></motion.div>)}
           {running && <div className="thinking"><i /><i /><i /></div>}
           <div ref={conversationEnd} className="conversation-end" />
         </div>
@@ -1400,7 +1446,7 @@ function App() {
         <AnimatePresence>{activityOpen && <motion.div className="activity-drawer" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
           <div className="activity-heading"><div><ListTodo size={15} /><span>{t('Codex activity', 'กิจกรรมของ Codex')}</span></div><div className="activity-heading-actions"><kbd>Ctrl + O</kbd><button onClick={clearHistory} title={t('Clear chat', 'ล้างประวัติแชท')}><Trash2 size={13} /></button></div></div>
           {queue.length > 0 && <div className="queue-section"><strong>{t('Message queue', 'คิวข้อความ')} {queue.length}</strong>{queue.map((task, index) => <div className="queue-item" key={task.id}><span>{index + 1}</span><p>{task.text}</p></div>)}</div>}
-          <div className="activity-list">{activity.length === 0 ? <div className="activity-empty">{t('No activity yet', 'ยังไม่มีกิจกรรม')}</div> : activity.slice().reverse().map(item => <div className={`activity-item ${item.status}`} key={item.id}><i /><div><div className="activity-title"><strong>{item.title}</strong>{(item.additions > 0 || item.deletions > 0) && <span><b>+{item.additions}</b><em>-{item.deletions}</em></span>}</div>{item.changes?.length > 0 && <div className="file-change-list">{item.changes.map((change, index) => <div className="file-change-row" key={`${change.path}-${index}`}><FilePenLine size={12} /><span>{change.path}</span><b>+{change.additions}</b><em>-{change.deletions}</em></div>)}</div>}{item.output && <pre>{item.output}</pre>}</div></div>)}</div>
+          <div className="activity-list">{activity.length === 0 ? <div className="activity-empty">{t('No activity yet', 'ยังไม่มีกิจกรรม')}</div> : activity.slice().reverse().map(item => <div className={`activity-item ${item.status}`} key={item.id}><i /><div><div className="activity-title"><strong>{item.title}</strong>{(item.additions > 0 || item.deletions > 0) && <span><b>+{item.additions}</b><em>-{item.deletions}</em></span>}</div>{item.changes?.length > 0 && <div className="file-change-list">{item.changes.map((change, index) => <div className="file-change-row" key={`${change.path}-${index}`}><FilePenLine size={12} /><span>{change.path}</span>{(change.additions > 0 || change.deletions > 0) && <><b>+{change.additions}</b><em>-{change.deletions}</em></>}</div>)}</div>}{item.output && <pre>{item.output}</pre>}</div></div>)}</div>
         </motion.div>}</AnimatePresence>
         <div className="composer">
           {commandSuggestions.length > 0 && <div className="command-menu"><div className="command-menu-label"><Command size={12} />{t('Commands', 'คำสั่ง')}</div>{commandSuggestions.map(command => <button key={command.name} onClick={() => setPrompt(command.name === '/approval' ? '/approval ' : command.name)}><code>{command.name}</code><span>{settings.language === 'th' ? command.description : command.descriptionEn}</span></button>)}</div>}

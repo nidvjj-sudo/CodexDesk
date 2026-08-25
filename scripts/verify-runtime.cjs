@@ -42,6 +42,9 @@ if (!mainSource.includes("ipcMain.handle('codex:plan'") || !mainSource.includes(
 if (!appSource.includes("['plan', 'plan_update', 'planUpdate', 'todo_list', 'todoList']")) {
   throw new Error('Codex plan update events are not handled')
 }
+if (!appSource.includes("artifactView === 'plan'") || !mainSource.includes("ipcMain.handle('undo:stats'")) {
+  throw new Error('Plan panel or real file change statistics are missing')
+}
 
 if (process.platform !== 'win32') process.exit(0)
 

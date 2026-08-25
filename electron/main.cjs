@@ -678,6 +678,68 @@ async function restoreUndoSnapshot(id) {
   return true
 }
 
+function changedLineCounts(previous, current) {
+  if (previous.includes(0) || current.includes(0)) return { additions: 0, deletions: 0, binary: true }
+  const oldLines = previous.length ? previous.toString('utf8').split(/\r?\n/) : []
+  const newLines = current.length ? current.toString('utf8').split(/\r?\n/) : []
+  const counts = new Map()
+  for (const line of oldLines) counts.set(line, (counts.get(line) || 0) - 1)
+  for (const line of newLines) counts.set(line, (counts.get(line) || 0) + 1)
+  let additions = 0
+  let deletions = 0
+  for (const count of counts.values()) {
+    if (count > 0) additions += count
+    else deletions -= count
+  }
+  return { additions, deletions, binary: false }
+}
+
+async function undoSnapshotStats(id) {
+  if (!/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new Error(uiText('Invalid undo snapshot.', 'จุดย้อนกลับไม่ถูกต้อง'))
+  const directory = path.join(undoDirectory(), id)
+  const backupRoot = path.join(directory, 'files')
+  const manifest = JSON.parse(await fs.readFile(path.join(directory, 'manifest.json'), 'utf8'))
+  const previousFiles = new Set(manifest.files.filter(relative => relative && !path.isAbsolute(relative) && !relative.startsWith('..')))
+  const currentFiles = new Map((await collectProjectFiles()).map(file => [file.relative, file.fullPath]))
+  const paths = [...new Set([...previousFiles, ...currentFiles.keys()])].sort()
+  const changes = []
+  for (const relative of paths) {
+    const previousPath = path.join(backupRoot, relative)
+    const currentPath = currentFiles.get(relative)
+    const previousExists = previousFiles.has(relative)
+    const currentExists = Boolean(currentPath)
+    let previous = Buffer.alloc(0)
+    let current = Buffer.alloc(0)
+    try {
+      if (previousExists) previous = await fs.readFile(previousPath)
+      if (currentExists) current = await fs.readFile(currentPath)
+    } catch { continue }
+    if (previous.equals(current)) continue
+    let stats = previous.length > 5 * 1024 * 1024 || current.length > 5 * 1024 * 1024
+      ? { additions: 0, deletions: 0, binary: true }
+      : changedLineCounts(previous, current)
+    if (previousExists && currentExists && !stats.binary) {
+      const diff = await run('git', ['diff', '--no-index', '--no-renames', '--numstat', '--', previousPath, currentPath], projectRoot)
+      const match = diff.output.match(/^(\d+|-)\s+(\d+|-)\s+/m)
+      if (match) {
+        stats = match[1] === '-' || match[2] === '-'
+          ? { additions: 0, deletions: 0, binary: true }
+          : { additions: Number(match[1]), deletions: Number(match[2]), binary: false }
+      }
+    }
+    changes.push({
+      path: relative.replace(/\\/g, '/'),
+      kind: previousExists && currentExists ? 'update' : currentExists ? 'create' : 'delete',
+      ...stats
+    })
+  }
+  return {
+    changes,
+    additions: changes.reduce((total, change) => total + change.additions, 0),
+    deletions: changes.reduce((total, change) => total + change.deletions, 0)
+  }
+}
+
 function normalizeConversation(payload = {}, id = payload.conversationId || randomUUID()) {
   const allowedKinds = new Set(['user', 'agent_message', 'output', 'error', 'system', 'plan'])
   const events = Array.isArray(payload.events) ? payload.events.slice(-300).flatMap(event => {
@@ -1157,6 +1219,7 @@ ipcMain.handle('history:clear', (_, id) => mutateHistory(async () => {
 ipcMain.handle('undo:create', async (_, label) => createUndoSnapshot(label))
 ipcMain.handle('undo:list', async () => listUndoSnapshots())
 ipcMain.handle('undo:restore', async (_, id) => restoreUndoSnapshot(id))
+ipcMain.handle('undo:stats', async (_, id) => undoSnapshotStats(id))
 ipcMain.handle('git:diff', async () => {
   if (!projectRoot) throw new Error(uiText('No project is open.', 'ยังไม่ได้เปิดโปรเจกต์'))
   const check = await run('git', ['rev-parse', '--is-inside-work-tree'], projectRoot)
