@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('codexDesk', {
   historyGet: () => ipcRenderer.invoke('history:get'),
   historySave: payload => ipcRenderer.invoke('history:save', payload),
   historyAppend: payload => ipcRenderer.invoke('history:append', payload),
+  historyUpdateEvent: payload => ipcRenderer.invoke('history:update-event', payload),
   historyList: () => ipcRenderer.invoke('history:list'),
   historyNew: () => ipcRenderer.invoke('history:new'),
   historyOpen: id => ipcRenderer.invoke('history:open', id),
@@ -43,6 +44,7 @@ contextBridge.exposeInMainWorld('codexDesk', {
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateDownload: () => ipcRenderer.invoke('update:download'),
   updateInstall: () => ipcRenderer.invoke('update:install'),
+  codexPlan: options => ipcRenderer.invoke('codex:plan', options),
   codexRun: options => ipcRenderer.invoke('codex:run', options),
   codexStop: conversationId => ipcRenderer.invoke('codex:stop', conversationId),
   onCodexEvent: callback => {

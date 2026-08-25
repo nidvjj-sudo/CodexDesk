@@ -126,6 +126,27 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .message.error .markdown { padding-left: 9px; border-left: 2px solid #69696f; }
 .message.system { padding: 9px 11px; border: 1px solid #28282c; border-radius: 9px; background: #101012; }
 .message.system .message-label > span { color: #8d8d93; }
+.message.plan { width: min(620px, 100%); }
+.plan-card { overflow: hidden; border: 1px solid #303034; border-radius: 12px; background: #111113; }
+.plan-heading { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; border-bottom: 1px solid #27272b; }
+.plan-heading > div { display: flex; align-items: center; gap: 8px; }
+.plan-heading strong { color: #e8e8ea; font-size: 10px; font-weight: 600; }
+.plan-heading > span { color: #77777d; font: 9px "Cascadia Mono", Consolas, monospace; }
+.plan-card > p { margin: 0; padding: 11px 12px 4px; color: #9b9ba1; font-size: 9.5px; line-height: 1.6; }
+.plan-card ol { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 8px 12px 12px; list-style: none; }
+.plan-card li { min-height: 29px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 7px; padding: 6px 0; color: #8e8e94; font-size: 9.5px; line-height: 1.55; }
+.plan-card li > i { width: 15px; height: 15px; display: grid; place-items: center; margin-top: 0; border: 1px solid #45454b; border-radius: 50%; color: #0c0c0e; font-style: normal; }
+.plan-card li.in_progress { color: #eeeeef; }
+.plan-card li.in_progress > i, .plan-generating > i { border: 2px solid #55555b; border-top-color: #eeeeef; animation: spin .75s linear infinite; }
+.plan-card li.completed { color: #bcbcc1; }
+.plan-card li.completed > i { border-color: #e7e7e9; background: #e7e7e9; }
+.plan-card li.failed > i { border-color: #c47e7e; background: #c47e7e; }
+.plan-generating { display: flex; align-items: center; gap: 8px; padding: 13px 12px; color: #89898f; font-size: 9.5px; }
+.plan-generating > i { width: 14px; height: 14px; border-radius: 50%; }
+.plan-actions { display: flex; justify-content: flex-end; gap: 7px; padding: 9px 12px; border-top: 1px solid #27272b; }
+.plan-actions button { height: 29px; display: flex; align-items: center; gap: 6px; padding: 0 11px; border: 1px solid #343439; border-radius: 7px; background: #171719; color: #a5a5ab; font-size: 9px; cursor: pointer; }
+.plan-actions button:hover { border-color: #505057; color: #eeeef0; }
+.plan-actions button.primary { border-color: #e6e6e8; background: #e6e6e8; color: #111113; }
 .markdown { min-width: 0; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
@@ -705,6 +726,13 @@ button:focus-visible, textarea:focus-visible { outline: 1px solid #777; outline-
 .app-shell.is-light .settings-toggle.on { background: #242428; }
 .app-shell.is-light .settings-footer button.primary, .app-shell.is-light :is(.auth-primary, .update-primary, .mcp-install) { background: #242428; color: #fff; }
 .app-shell.is-light .modal-backdrop { background: #20202455; }
+.app-shell.is-light .plan-card { border-color: #d7d7da; background: #fff; }
+.app-shell.is-light .plan-heading, .app-shell.is-light .plan-actions { border-color: #e4e4e7; }
+.app-shell.is-light .plan-heading strong, .app-shell.is-light .plan-card li.in_progress { color: #171719; }
+.app-shell.is-light .plan-card > p, .app-shell.is-light .plan-card li, .app-shell.is-light .plan-generating { color: #68686e; }
+.app-shell.is-light .plan-card li.completed > i { border-color: #202023; background: #202023; color: #fff; }
+.app-shell.is-light .plan-actions button { border-color: #d5d5d8; background: #f7f7f8; color: #525258; }
+.app-shell.is-light .plan-actions button.primary { border-color: #202023; background: #202023; color: #fff; }
 .app-shell.is-light .notice-toast { background: #fffffff2; color: #202024; box-shadow: 0 14px 40px #20202826; }
 .app-shell.is-light .notice-toast p { color: #34343a; }
 .app-shell.is-light :is(.monaco-editor, .monaco-editor-background, .monaco-editor .margin) { background-color: #fff !important; }

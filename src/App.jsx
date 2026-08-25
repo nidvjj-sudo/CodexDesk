@@ -68,6 +68,23 @@ function Toggle({ checked, onChange, disabled = false }) {
   return <button type="button" role="switch" aria-checked={checked} className={`settings-toggle ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)} disabled={disabled}><i /></button>
 }
 
+function PlanCard({ event, canDecide, onApprove, onCancel, translate }) {
+  const labels = {
+    generating: translate('Creating plan', 'กำลังสร้างแผน'),
+    awaiting: translate('Plan ready', 'แผนพร้อมแล้ว'),
+    running: translate('Working through plan', 'กำลังทำตามแผน'),
+    completed: translate('Plan completed', 'ทำตามแผนเสร็จแล้ว'),
+    failed: translate('Plan stopped', 'แผนหยุดทำงาน'),
+    cancelled: translate('Plan cancelled', 'ยกเลิกแผนแล้ว')
+  }
+  return <div className={`plan-card ${event.status}`}>
+    <div className="plan-heading"><div><ListTodo size={14} /><strong>{labels[event.status] || labels.awaiting}</strong></div><span>{event.steps?.filter(step => step.status === 'completed').length || 0}/{event.steps?.length || 0}</span></div>
+    {event.summary && <p>{event.summary}</p>}
+    {event.status === 'generating' ? <div className="plan-generating"><i />{translate('Inspecting the project', 'กำลังตรวจโปรเจกต์')}</div> : <ol>{(event.steps || []).map((step, index) => <li className={step.status} key={`${event.id}-${index}`}><i>{step.status === 'completed' ? <Check size={11} /> : step.status === 'failed' ? <X size={11} /> : null}</i><span>{step.text}</span></li>)}</ol>}
+    {event.status === 'awaiting' && canDecide && <div className="plan-actions"><button onClick={onCancel}>{translate('Cancel', 'ยกเลิก')}</button><button className="primary" onClick={onApprove}><Check size={12} />{translate('Approve and start', 'ยืนยันและเริ่มทำ')}</button></div>}
+  </div>
+}
+
 function SettingsModal({ authenticated, currentVersion, draft, onChange, onClearData, onClose, onOpenMcp, onSave, onSignOut, onUpdate, saving, section, setSection }) {
   const l = (english, thai) => draft.language === 'th' ? thai : english
   const navigation = [
@@ -91,7 +108,7 @@ function SettingsModal({ authenticated, currentVersion, draft, onChange, onClear
         {section === 'general' && <><div className="settings-title"><Monitor size={18} /><div><h3>{l('General', 'ทั่วไป')}</h3><p>{l('Appearance and app behavior', 'หน้าตาและพฤติกรรมของแอป')}</p></div></div><div className="settings-grid">{select('language', l('App language', 'ภาษาแอป'), draft.language, [{ value: 'en', label: 'English' }, { value: 'th', label: 'ไทย' }])}{select('theme', l('Theme', 'ธีม'), draft.theme, [{ value: 'black', label: l('Pure black', 'ดำสนิท') }, { value: 'dark', label: l('Dark gray', 'เทาเข้ม') }, { value: 'light', label: l('Light', 'สว่าง') }, { value: 'system', label: l('System', 'ตามระบบ') }])}{select('density', l('Density', 'ความหนาแน่น'), draft.density, [{ value: 'comfortable', label: l('Comfortable', 'สบายตา') }, { value: 'compact', label: l('Compact', 'กะทัดรัด') }])}{select('sendMode', l('Send message', 'ปุ่มส่งข้อความ'), draft.sendMode, [{ value: 'enter', label: l('Enter to send', 'Enter เพื่อส่ง') }, { value: 'ctrl-enter', label: l('Ctrl + Enter to send', 'Ctrl + Enter เพื่อส่ง') }])}</div>{row(l('Auto-scroll chat', 'เลื่อนแชทอัตโนมัติ'), l('Follow new messages while Codex is working', 'ตามข้อความใหม่ระหว่าง Codex ทำงาน'), 'autoScroll')}{row(l('Prevent sleep while app is open', 'ป้องกันเครื่องพักระหว่างเปิดแอป'), l('Keeps long-running tasks active in the background', 'ช่วยให้งานยาวทำต่อได้ในเบื้องหลัง'), 'preventSleep')}{row(l('Notify when tasks finish', 'แจ้งเตือนเมื่องานเสร็จ'), l('Show a Windows notification when the app is not focused', 'แสดง Windows notification เมื่อแอปไม่ได้อยู่ด้านหน้า'), 'notifications')}</>}
         {section === 'personal' && <><div className="settings-title"><Palette size={18} /><div><h3>Personalization</h3><p>{l('Choose how Codex responds and remembers context', 'กำหนดวิธีที่ Codex ตอบและจดจำบริบท')}</p></div></div>{select('personality', l('Response style', 'บุคลิกการตอบ'), draft.personality, [{ value: 'pragmatic', label: l('Pragmatic and concise', 'กระชับและตรงประเด็น') }, { value: 'friendly', label: l('Friendly and explanatory', 'เป็นมิตรและอธิบายมากขึ้น') }, { value: 'none', label: l('No personality', 'ไม่กำหนดบุคลิก') }])}<label className="settings-field full"><span>{l('Custom instructions', 'คำแนะนำส่วนตัว')}</span><textarea value={draft.customInstructions} onChange={event => set('customInstructions', event.target.value)} maxLength={12000} placeholder={l('For example: use clean code and verify changes before editing', 'เช่น ตอบเป็นภาษาไทย เขียนโค้ดให้อ่านง่าย และตรวจสอบก่อนแก้ไข')} /><small>{draft.customInstructions.length.toLocaleString()} / 12,000 {l('characters', 'ตัวอักษร')}</small></label><div className="settings-subheading"><Brain size={14} />{l('Codex memories', 'ความทรงจำของ Codex')}</div>{row(l('Enable memories', 'เปิดใช้ความทรงจำ'), l('Use the Codex CLI memory system', 'ให้ Codex ใช้ระบบ memories ของ CLI'), 'memoriesEnabled')}{row(l('Use saved memories', 'ใช้ความทรงจำที่มีอยู่'), l('Apply remembered context to future tasks', 'นำสิ่งที่จำไว้มาใช้กับงานใหม่'), 'useMemories', !draft.memoriesEnabled)}{row(l('Generate new memories', 'สร้างความทรงจำใหม่'), l('Learn reusable guidance for future tasks', 'เรียนรู้คำแนะนำที่เป็นประโยชน์สำหรับงานถัดไป'), 'generateMemories', !draft.memoriesEnabled)}{row(l('Disable with external context', 'ปิดเมื่อมีบริบทภายนอก'), l('Reduce context mixing when external tools are connected', 'ลดการผสมข้อมูลเมื่อเชื่อมเครื่องมือภายนอก'), 'disableMemoriesOnExternal', !draft.memoriesEnabled)}</>}
         {section === 'model' && <><div className="settings-title"><Brain size={18} /><div><h3>{l('Model & web search', 'โมเดลและการค้นเว็บ')}</h3><p>{l('Defaults used by Codex CLI for new tasks', 'ค่าหลักที่ Codex CLI ใช้กับทุกแชทใหม่')}</p></div></div>{select('model', l('Model', 'โมเดล'), draft.model, [{ value: '', label: l('Account default', 'ค่าเริ่มต้นของบัญชี') }, { value: 'gpt-5.6-sol', label: l('GPT-5.6 Sol — most capable', 'GPT-5.6 Sol — ฉลาดที่สุด') }, { value: 'gpt-5.6-terra', label: l('GPT-5.6 Terra — balanced', 'GPT-5.6 Terra — สมดุล') }, { value: 'gpt-5.6-luna', label: l('GPT-5.6 Luna — fast and efficient', 'GPT-5.6 Luna — เร็วและประหยัด') }, { value: 'gpt-5.5', label: l('GPT-5.5 — previous generation', 'GPT-5.5 — รุ่นก่อนหน้า') }])}<div className="settings-subheading"><Brain size={14} />{l('Reasoning effort', 'ระดับการคิด')}</div><div className="reasoning-picker">{[{ value: 'low', label: 'Low', detail: l('Fast, lower usage', 'เร็วและใช้น้อย') }, { value: 'medium', label: 'Medium', detail: l('Balanced, recommended', 'สมดุล แนะนำ') }, { value: 'high', label: 'High', detail: l('More thorough', 'คิดละเอียดขึ้น') }, { value: 'xhigh', label: 'Extra high', detail: l('Most complex tasks', 'งานซับซ้อนที่สุด') }].map(option => <button key={option.value} className={draft.reasoningEffort === option.value ? 'active' : ''} onClick={() => set('reasoningEffort', option.value)}><strong>{option.label}</strong><small>{option.detail}</small></button>)}</div><p className="usage-hint">{l('Higher levels usually take longer and use more quota. Actual usage depends on the model, task, and ChatGPT plan.', 'ระดับที่สูงขึ้นมักใช้เวลานานและใช้โควตามากขึ้น จำนวนจริงขึ้นอยู่กับโมเดล งาน และแผน ChatGPT ของคุณ')}</p>{select('webSearch', l('Web search', 'การค้นเว็บ'), draft.webSearch, [{ value: 'cached', label: l('Cached — safer default', 'Cached ปลอดภัยกว่า') }, { value: 'live', label: l('Live — latest information', 'Live ข้อมูลล่าสุด') }, { value: 'disabled', label: l('Disabled', 'ปิด') }])}<div className="settings-callout"><Globe2 size={15} /><div><strong>{l('Codex can search the web', 'Codex ค้นเว็บได้จริง')}</strong><p>{l('Cached uses OpenAI’s search index. Live fetches current pages. Web content can be untrusted, so verify sources.', 'Cached ใช้ดัชนีของ OpenAI ส่วน Live เปิดหน้าเว็บล่าสุด การค้นเว็บอาจพบเนื้อหาที่ไม่น่าเชื่อถือ ควรตรวจแหล่งอ้างอิงเสมอ')}</p></div></div></>}
-        {section === 'permissions' && <><div className="settings-title"><LockKeyhole size={18} /><div><h3>{l('Default permissions', 'สิทธิ์เริ่มต้น')}</h3><p>{l('Applied the next time the app starts', 'ใช้เมื่อเริ่มแอปครั้งถัดไป')}</p></div></div>{row(l('Allow file edits', 'อนุญาตแก้ไขไฟล์'), l('Codex can read, create, edit, and run tools in the project', 'Codex อ่าน สร้าง แก้ไข และรันเครื่องมือในโปรเจกต์ได้'), 'defaultAllowEdit')}<div className="settings-grid">{select('defaultApproval', l('Confirmation before tasks', 'การยืนยันก่อนเริ่มงาน'), draft.defaultApproval, [{ value: 'ask', label: l('Ask every time', 'ถามทุกครั้ง') }, { value: 'auto', label: l('Automatic', 'ทำอัตโนมัติ') }])}</div><div className="settings-callout"><ShieldCheck size={15} /><div><strong>{l('Permissions apply to local work', 'สิทธิ์มีผลกับงานในเครื่อง')}</strong><p>{l('Ask mode confirms before file-changing tasks. Risky commands remain subject to Codex and operating-system policy.', 'โหมดถามก่อนจะขออนุญาตก่อนเริ่มงานที่แก้ไฟล์ ส่วนคำสั่งเสี่ยงยังขึ้นอยู่กับนโยบายของ Codex และระบบปฏิบัติการ')}</p></div></div></>}
+        {section === 'permissions' && <><div className="settings-title"><LockKeyhole size={18} /><div><h3>{l('Default permissions', 'สิทธิ์เริ่มต้น')}</h3><p>{l('Applied the next time the app starts', 'ใช้เมื่อเริ่มแอปครั้งถัดไป')}</p></div></div>{row(l('Allow file edits', 'อนุญาตแก้ไขไฟล์'), l('Codex can read, create, edit, and run tools in the project', 'Codex อ่าน สร้าง แก้ไข และรันเครื่องมือในโปรเจกต์ได้'), 'defaultAllowEdit')}<div className="settings-grid">{select('defaultApproval', l('Confirmation before tasks', 'การยืนยันก่อนเริ่มงาน'), draft.defaultApproval, [{ value: 'ask', label: l('Create plan first', 'สร้างแผนก่อน') }, { value: 'auto', label: l('Automatic', 'ทำอัตโนมัติ') }])}</div><div className="settings-callout"><ShieldCheck size={15} /><div><strong>{l('Permissions apply to local work', 'สิทธิ์มีผลกับงานในเครื่อง')}</strong><p>{l('Plan mode inspects the project read-only, then waits for your approval before starting. Risky commands remain subject to Codex and operating-system policy.', 'โหมดแผนจะตรวจโปรเจกต์แบบอ่านอย่างเดียว แล้วรอให้คุณยืนยันก่อนเริ่มทำงาน ส่วนคำสั่งเสี่ยงยังขึ้นอยู่กับนโยบายของ Codex และระบบปฏิบัติการ')}</p></div></div></>}
         {section === 'integrations' && <><div className="settings-title"><Plug size={18} /><div><h3>{l('Integrations', 'การเชื่อมต่อ')}</h3><p>{l('ChatGPT account, MCP tools, and Discord', 'บัญชี ChatGPT เครื่องมือ MCP และ Discord')}</p></div></div><div className="settings-account"><span className={authenticated ? 'ready' : ''}>{authenticated ? <Check size={16} /> : <LogIn size={16} />}</span><div><strong>{authenticated ? l('ChatGPT connected', 'เชื่อมต่อ ChatGPT แล้ว') : l('ChatGPT not connected', 'ยังไม่ได้เชื่อมต่อ ChatGPT')}</strong><small>{l('Codex CLI uses this account to process tasks', 'Codex CLI ใช้บัญชีนี้เพื่อประมวลผลงาน')}</small></div>{authenticated && <button onClick={onSignOut}>{l('Sign out', 'ออกจากระบบ')}</button>}</div><button className="settings-wide-action" onClick={onOpenMcp}><Plug size={14} /><div><strong>{l('Manage MCP plugins', 'จัดการปลั๊กอิน MCP')}</strong><small>{l('GitHub, Canva, Google Drive, and your own servers', 'GitHub, Canva, Google Drive และเซิร์ฟเวอร์ของคุณ')}</small></div><ChevronRight size={15} /></button><div className="settings-subheading"><Bot size={14} />Discord Rich Presence</div>{row(l('Show CodexDesk in Discord', 'แสดง CodexDesk ใน Discord'), l('Discord Desktop must be running', 'ต้องเปิดโปรแกรม Discord Desktop'), 'discordPresence')}<label className="settings-field full"><span>{l('Discord Application ID', 'Discord Application ID')}</span><input value={draft.discordClientId} onChange={event => set('discordClientId', event.target.value.replace(/\D/g, '').slice(0, 24))} disabled={!draft.discordPresence} placeholder="123456789012345678" /><small>{l('Create an application in the Discord Developer Portal and copy its Application ID.', 'สร้างแอปใน Discord Developer Portal แล้วคัดลอก Application ID')}</small></label>{row(l('Show project name', 'แสดงชื่อโปรเจกต์'), l('Displays “In project-name” in your Discord activity', 'แสดง “ใน ชื่อโปรเจกต์” บนสถานะ Discord'), 'discordShowProject', !draft.discordPresence)}</>}
         {section === 'privacy' && <><div className="settings-title"><ShieldCheck size={18} /><div><h3>{l('Data & privacy', 'ข้อมูลและความเป็นส่วนตัว')}</h3><p>{l('Understand how your data is stored and used', 'ดูว่าข้อมูลถูกเก็บและใช้งานอย่างไร')}</p></div></div><div className="privacy-card"><strong>{l('Data in CodexDesk', 'ข้อมูลใน CodexDesk')}</strong><p>{l('Chat history and undo snapshots are stored on this device. Prompts and context used by Codex are sent to OpenAI through Codex CLI under your account type and workspace policy.', 'ประวัติแชทและจุดย้อนกลับเก็บไว้ในเครื่องนี้ ส่วนข้อความและบริบทที่ Codex ใช้จะถูกส่งผ่าน Codex CLI ไปยัง OpenAI ตามประเภทบัญชีและนโยบายของพื้นที่ทำงาน')}</p></div><button className="settings-wide-action" onClick={() => api.openLink('https://openai.com/policies/privacy-policy/')}><ExternalLink size={14} /><div><strong>{l('OpenAI Privacy Policy', 'นโยบายความเป็นส่วนตัวของ OpenAI')}</strong><small>{l('Read the official privacy policy', 'อ่าน Privacy Policy ฉบับทางการ')}</small></div><ChevronRight size={15} /></button><button className="settings-wide-action" onClick={() => api.openLink('https://learn.chatgpt.com/api/docs/guides/your-data')}><ExternalLink size={14} /><div><strong>{l('Data controls', 'ข้อมูลและการควบคุมข้อมูล')}</strong><small>{l('Learn how ChatGPT and API data is managed', 'อ่านวิธีจัดการข้อมูลของ ChatGPT และ API')}</small></div><ChevronRight size={15} /></button><button className="settings-wide-action" onClick={() => api.openLink('https://learn.chatgpt.com/docs/auth')}><ExternalLink size={14} /><div><strong>{l('Codex authentication', 'การเข้าสู่ระบบ Codex')}</strong><small>{l('Sign-in method affects data policy', 'ประเภทการเข้าสู่ระบบมีผลต่อนโยบายข้อมูล')}</small></div><ChevronRight size={15} /></button><button className="danger-action" onClick={onClearData}><Trash2 size={14} />{l('Delete all local chat and undo history', 'ลบประวัติแชทและจุดย้อนกลับทั้งหมดในเครื่อง')}</button></>}
         {section === 'about' && <><div className="settings-title"><Info size={18} /><div><h3>{l('About CodexDesk', 'เกี่ยวกับ CodexDesk')}</h3><p>{l('Desktop workspace for OpenAI Codex CLI on Windows', 'เดสก์ท็อปสำหรับ OpenAI Codex CLI บน Windows')}</p></div></div><div className="about-mark"><Code2 size={22} /><div><strong>CodexDesk</strong><small>{l('Version', 'เวอร์ชัน')} {currentVersion || l('Checking', 'กำลังตรวจสอบ')}</small></div></div><button className="settings-wide-action" onClick={onUpdate}><RefreshCw size={14} /><div><strong>{l('Check for updates', 'ตรวจสอบอัปเดต')}</strong><small>{l('Downloads and installs only after you confirm', 'ดาวน์โหลดและติดตั้งเมื่อคุณยืนยันเท่านั้น')}</small></div><ChevronRight size={15} /></button><button className="settings-wide-action" onClick={() => api.openLink('https://developers.openai.com/codex/cli')}><ExternalLink size={14} /><div><strong>{l('Codex CLI guide', 'คู่มือ Codex CLI')}</strong><small>{l('Official OpenAI documentation', 'เอกสารทางการจาก OpenAI')}</small></div><ChevronRight size={15} /></button></>}
@@ -314,6 +331,9 @@ function App() {
   const openedChange = useRef(null)
   const usageRequestId = useRef(0)
   const usageRefreshing = useRef(false)
+  const planStateByChat = useRef(new Map())
+  const pendingPlansByChat = useRef(new Map())
+  const activePlanByChat = useRef(new Map())
 
   const t = (english, thai) => settings.language === 'th' ? thai : english
   const lightTheme = settings.theme === 'light' || (settings.theme === 'system' && systemLight)
@@ -783,6 +803,40 @@ function App() {
     }
   }
 
+  function updatePlanEvent(chatId, updater) {
+    const current = planStateByChat.current.get(chatId)
+    if (!current) return
+    const next = updater(current)
+    if (!next) return
+    planStateByChat.current.set(chatId, next)
+    if (chatId === conversationIdRef.current) {
+      setEvents(items => items.map(event => event.id === next.id ? next : event))
+    } else {
+      void api.historyUpdateEvent({ conversationId: chatId, event: next }).catch(() => {})
+    }
+  }
+
+  function planStepsFromItem(item) {
+    let source = item?.steps || item?.items || item?.todos || item?.entries || item?.plan || []
+    if (!Array.isArray(source) && Array.isArray(source?.steps)) source = source.steps
+    if (!Array.isArray(source)) return []
+    return source.flatMap(step => {
+      const text = typeof step === 'string' ? step : step?.step || step?.text || step?.title || step?.description
+      if (!text) return []
+      const rawStatus = typeof step === 'string' ? 'pending' : String(step.status || step.state || '').toLowerCase()
+      const status = ['completed', 'complete', 'done'].includes(rawStatus) ? 'completed'
+        : ['in_progress', 'in-progress', 'inprogress', 'running', 'active'].includes(rawStatus) ? 'in_progress'
+          : ['failed', 'error'].includes(rawStatus) ? 'failed' : 'pending'
+      return [{ text: String(text).trim(), status }]
+    }).slice(0, 12)
+  }
+
+  function applyCodexPlanUpdate(chatId, item) {
+    const steps = planStepsFromItem(item)
+    if (!steps.length || !activePlanByChat.current.has(chatId)) return
+    updatePlanEvent(chatId, event => ({ ...event, status: 'running', steps }))
+  }
+
   function parseCodexOutput(raw, flush = false, chatId = conversationIdRef.current) {
     if (!chatId) return
     const buffered = (codexBuffers.current.get(chatId) || '') + raw
@@ -802,6 +856,7 @@ function App() {
         if (event.type === 'item.completed' && event.item?.type === 'agent_message' && event.item.text) {
           additions.push({ kind: 'agent_message', text: event.item.text })
         }
+        if (['plan', 'plan_update', 'planUpdate', 'todo_list', 'todoList'].includes(event.item?.type)) applyCodexPlanUpdate(chatId, event.item)
         if (chatId === conversationIdRef.current && event.item && event.item.type !== 'agent_message') updateActivity(event)
         if (event.type === 'error') {
           additions.push({ kind: 'error', text: event.message || t('Codex could not complete the task.', 'Codex ทำงานไม่สำเร็จ') })
@@ -817,6 +872,7 @@ function App() {
 
   function updateActivity(event) {
     const item = event.item
+    if (['plan', 'plan_update', 'planUpdate', 'todo_list', 'todoList'].includes(item.type)) return
     const id = item.id || `${item.type}-${Date.now()}`
     const labels = { reasoning: t('Thinking', 'กำลังวิเคราะห์'), file_change: t('Editing files', 'กำลังแก้ไขไฟล์'), fileChange: t('Editing files', 'กำลังแก้ไขไฟล์'), command_execution: t('Running command', 'กำลังรันคำสั่ง'), commandExecution: t('Running command', 'กำลังรันคำสั่ง'), web_search: t('Searching', 'กำลังค้นหา'), webSearch: t('Searching', 'กำลังค้นหา'), mcp_tool_call: t('Using tool', 'กำลังใช้เครื่องมือ'), mcpToolCall: t('Using tool', 'กำลังใช้เครื่องมือ') }
     const changes = ['file_change', 'fileChange'].includes(item.type) ? fileChangeDetails(item) : []
@@ -879,7 +935,7 @@ function App() {
         const snapshot = await api.undoCreate(task.text)
         setUndoStack(items => [snapshot, ...items].slice(0, 10))
       }
-      const result = await api.codexRun({ conversationId: chatId, prompt: task.text, allowEdit: task.allowEdit, sessionId: sessionsByChat.current.get(chatId) || null, attachments: task.attachments })
+      const result = await api.codexRun({ conversationId: chatId, prompt: task.text, allowEdit: task.allowEdit, sessionId: sessionsByChat.current.get(chatId) || null, attachments: task.attachments, plan: task.plan || [] })
       completed = result.code === 0
       await refreshFiles()
     } catch (error) {
@@ -888,15 +944,77 @@ function App() {
       if (task.attachments?.length) await api.removeAttachments(task.attachments).catch(() => {})
     }
     if (chatId === conversationIdRef.current) setActivity(items => items.map(item => item.id === `task-${task.id}` ? { ...item, status: completed ? 'completed' : 'failed' } : item))
+    if (task.planEventId) {
+      updatePlanEvent(chatId, event => ({
+        ...event,
+        status: completed ? 'completed' : 'failed',
+        steps: event.steps.map(step => ({ ...step, status: completed ? 'completed' : step.status === 'in_progress' ? 'failed' : step.status }))
+      }))
+      activePlanByChat.current.delete(chatId)
+    }
+    advanceQueue(chatId)
+  }
+
+  function advanceQueue(chatId) {
     const chatQueue = queuesByChat.current.get(chatId) || []
     const next = chatQueue.shift()
     queuesByChat.current.set(chatId, chatQueue)
     if (chatId === conversationIdRef.current) setQueue([...chatQueue])
     if (next) {
-      void executeTask(next, chatId)
+      if (next.needsPlan) void preparePlan(next, chatId)
+      else void executeTask(next, chatId)
     } else {
       setChatRunning(chatId, false)
     }
+  }
+
+  async function preparePlan(task, chatId) {
+    const planEvent = {
+      id: `plan-${task.id}`,
+      kind: 'plan',
+      text: task.text,
+      summary: '',
+      status: 'generating',
+      steps: []
+    }
+    planStateByChat.current.set(chatId, planEvent)
+    appendChatEvents(chatId, [planEvent])
+    if (chatId === conversationIdRef.current) setEvents(items => items.map(event => event.id === task.id ? { ...event, queued: false } : event))
+    setChatRunning(chatId, true)
+    try {
+      const result = await api.codexPlan({ conversationId: chatId, prompt: task.text, attachments: task.attachments })
+      const ready = { ...planEvent, summary: result.summary, status: 'awaiting', steps: result.steps.map(text => ({ text, status: 'pending' })) }
+      planStateByChat.current.set(chatId, ready)
+      pendingPlansByChat.current.set(chatId, { task, planEventId: ready.id })
+      if (chatId === conversationIdRef.current) setEvents(items => items.map(event => event.id === ready.id ? ready : event))
+      else await api.historyUpdateEvent({ conversationId: chatId, event: ready })
+      setChatRunning(chatId, false)
+    } catch (error) {
+      updatePlanEvent(chatId, event => ({ ...event, status: 'failed', summary: error.message }))
+      if (task.attachments?.length) await api.removeAttachments(task.attachments).catch(() => {})
+      setChatRunning(chatId, false)
+      advanceQueue(chatId)
+    }
+  }
+
+  function approvePlan(chatId, planEventId) {
+    const pending = pendingPlansByChat.current.get(chatId)
+    const planEvent = planStateByChat.current.get(chatId)
+    if (!pending || !planEvent || pending.planEventId !== planEventId) return
+    pendingPlansByChat.current.delete(chatId)
+    activePlanByChat.current.set(chatId, planEventId)
+    const steps = planEvent.steps.map((step, index) => ({ ...step, status: index === 0 ? 'in_progress' : 'pending' }))
+    updatePlanEvent(chatId, event => ({ ...event, status: 'running', steps }))
+    void executeTask({ ...pending.task, plan: steps.map(step => step.text), planEventId }, chatId)
+  }
+
+  function cancelPlan(chatId, planEventId) {
+    const pending = pendingPlansByChat.current.get(chatId)
+    if (!pending || pending.planEventId !== planEventId) return
+    pendingPlansByChat.current.delete(chatId)
+    updatePlanEvent(chatId, event => ({ ...event, status: 'cancelled' }))
+    if (pending.task.attachments?.length) void api.removeAttachments(pending.task.attachments)
+    advanceQueue(chatId)
   }
 
   async function sendPrompt() {
@@ -915,27 +1033,27 @@ function App() {
         return
       }
     }
-    if (allowEdit && approvalMode === 'ask' && !confirm(t('Allow Codex to edit files, run commands, and use MCP tools for this task?', 'อนุญาตให้ Codex แก้ไขไฟล์ รันคำสั่ง และใช้ปลั๊กอิน MCP สำหรับงานนี้หรือไม่'))) return
     const submitted = attachments
     const request = text || t('Analyze the attached media.', 'วิเคราะห์สื่อที่แนบมา')
     const attachmentPaths = submitted.flatMap(item => item.paths)
     const chatId = conversationIdRef.current
     if (!chatId) return
-    const task = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text: request, allowEdit, attachments: attachmentPaths }
+    const task = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text: request, allowEdit, attachments: attachmentPaths, needsPlan: approvalMode === 'ask' }
     setPrompt('')
     setAttachments([])
     submitted.forEach(item => URL.revokeObjectURL(item.preview))
     const attachmentLabel = submitted.length ? `\n\n${t('Attachments', 'ไฟล์แนบ')}: ${submitted.map(item => item.name).join(', ')}` : ''
-    const chatRunning = runningChatsRef.current.has(chatId)
-    setEvents(items => [...items, { id: task.id, kind: 'user', text: `${request}${attachmentLabel}`, queued: chatRunning }])
-    if (chatRunning) {
+    const chatBusy = runningChatsRef.current.has(chatId) || pendingPlansByChat.current.has(chatId)
+    setEvents(items => [...items, { id: task.id, kind: 'user', text: `${request}${attachmentLabel}`, queued: chatBusy }])
+    if (chatBusy) {
       const chatQueue = queuesByChat.current.get(chatId) || []
       chatQueue.push(task)
       queuesByChat.current.set(chatId, chatQueue)
       setQueue([...chatQueue])
       return
     }
-    void executeTask(task, chatId)
+    if (task.needsPlan) void preparePlan(task, chatId)
+    else void executeTask(task, chatId)
   }
 
   function dismissNotice(id) {
@@ -969,7 +1087,7 @@ function App() {
       return
     }
     if (command === '/status') {
-      addSystemMessage(settings.language === 'th' ? `### สถานะ\n- โปรเจกต์: **${project?.name || 'ยังไม่ได้เปิด'}**\n- บัญชี: **${authenticated ? 'เชื่อมต่อแล้ว' : 'ยังไม่เชื่อมต่อ'}**\n- Codex: **${running ? 'กำลังทำงาน' : 'พร้อมใช้งาน'}**\n- คิว: **${queue.length}**\n- สิทธิ์: **${allowEdit ? 'แก้ไขไฟล์ได้' : 'อ่านอย่างเดียว'}**\n- การอนุมัติ: **${approvalMode === 'ask' ? 'ถามก่อน' : 'อัตโนมัติ'}**` : `### Status\n- Project: **${project?.name || 'Not open'}**\n- Account: **${authenticated ? 'Connected' : 'Not connected'}**\n- Codex: **${running ? 'Working' : 'Ready'}**\n- Queue: **${queue.length}**\n- Permission: **${allowEdit ? 'Workspace write' : 'Read only'}**\n- Approval: **${approvalMode === 'ask' ? 'Ask first' : 'Automatic'}**`)
+      addSystemMessage(settings.language === 'th' ? `### สถานะ\n- โปรเจกต์: **${project?.name || 'ยังไม่ได้เปิด'}**\n- บัญชี: **${authenticated ? 'เชื่อมต่อแล้ว' : 'ยังไม่เชื่อมต่อ'}**\n- Codex: **${running ? 'กำลังทำงาน' : 'พร้อมใช้งาน'}**\n- คิว: **${queue.length}**\n- สิทธิ์: **${allowEdit ? 'แก้ไขไฟล์ได้' : 'อ่านอย่างเดียว'}**\n- การอนุมัติ: **${approvalMode === 'ask' ? 'สร้างแผนก่อน' : 'อัตโนมัติ'}**` : `### Status\n- Project: **${project?.name || 'Not open'}**\n- Account: **${authenticated ? 'Connected' : 'Not connected'}**\n- Codex: **${running ? 'Working' : 'Ready'}**\n- Queue: **${queue.length}**\n- Permission: **${allowEdit ? 'Workspace write' : 'Read only'}**\n- Approval: **${approvalMode === 'ask' ? 'Plan first' : 'Automatic'}**`)
       return
     }
     if (command === '/diff') {
@@ -1009,7 +1127,7 @@ function App() {
         return
       }
       setApprovalMode(mode)
-      addSystemMessage(mode === 'ask' ? t('Approval mode set to ask first.', 'ตั้งเป็นถามก่อนเริ่มงานแล้ว') : t('Approval mode set to automatic.', 'ตั้งเป็นทำงานอัตโนมัติแล้ว'))
+      addSystemMessage(mode === 'ask' ? t('Approval mode set to create a plan first.', 'ตั้งเป็นสร้างแผนก่อนเริ่มงานแล้ว') : t('Approval mode set to automatic.', 'ตั้งเป็นทำงานอัตโนมัติแล้ว'))
       return
     }
     if (command === '/update') {
@@ -1087,7 +1205,16 @@ function App() {
     sessionIdRef.current = history.sessionId || null
     setSessionId(history.sessionId || null)
     setConversationId(history.conversationId)
-    setEvents((history.events || []).filter(event => event.kind !== 'system').map(event => ({ ...event, queued: false })))
+    const nextEvents = (history.events || []).filter(event => event.kind !== 'system').map(event => {
+      if (event.kind !== 'plan') return { ...event, queued: false }
+      const resumable = pendingPlansByChat.current.has(history.conversationId) || activePlanByChat.current.has(history.conversationId) || runningChatsRef.current.has(history.conversationId)
+      if (!resumable && ['generating', 'awaiting', 'running'].includes(event.status)) return { ...event, status: 'cancelled' }
+      return event
+    })
+    const latestPlan = nextEvents.filter(event => event.kind === 'plan').at(-1)
+    if (latestPlan) planStateByChat.current.set(history.conversationId, latestPlan)
+    else planStateByChat.current.delete(history.conversationId)
+    setEvents(nextEvents)
     setActivity(activitiesByChat.current.get(history.conversationId) || [])
     setQueue([...(queuesByChat.current.get(history.conversationId) || [])])
   }
@@ -1261,7 +1388,7 @@ function App() {
         <div className="agent-meta"><span>Local workspace</span><span>{allowEdit ? 'Workspace write' : 'Read only'}</span></div>
         <div className="conversation">
           {events.length === 0 && <div className="welcome"><span className="welcome-kicker">CODEX WORKSPACE</span><div className="welcome-icon"><Bot size={22} /></div><h2>{t('What would you like to build?', 'วันนี้ต้องการสร้างอะไร')}</h2><p>{t('Ask Codex to create, inspect, or edit code. No folder is required.', 'สั่งให้ Codex สร้าง อ่าน ตรวจสอบ หรือแก้ไขงานได้โดยไม่ต้องเปิดโฟลเดอร์')}</p><div className="welcome-actions"><button onClick={() => setPrompt(t('Inspect this project and summarize improvements', 'ตรวจสอบโครงสร้างโปรเจกต์และสรุปสิ่งที่ควรปรับปรุง'))}><Search size={13} /><span>{t('Inspect project', 'ตรวจโปรเจกต์')}</span></button><button onClick={() => setPrompt(t('Find potential bugs and fix them safely', 'ค้นหาบัคที่อาจเกิดขึ้นและแก้ไขให้ปลอดภัย'))}><ShieldCheck size={13} /><span>{t('Find bugs', 'ค้นหาบัค')}</span></button><button onClick={() => setPrompt(t('Create a new project for me. Ask only for essential requirements.', 'สร้างโปรเจกต์ใหม่ให้ฉัน ถามเฉพาะข้อมูลที่จำเป็น'))}><Code2 size={13} /><span>{t('New project', 'สร้างโปรเจกต์')}</span></button></div></div>}
-          {events.filter(event => event.kind !== 'system').map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}><div className="message-label"><span>{event.kind === 'user' ? event.queued ? t('You · queued', 'คุณ · อยู่ในคิว') : t('You', 'คุณ') : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title={t('Copy message', 'คัดลอกข้อความ')}><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage onOpenFile={openFileLink} text={event.text} /></div></motion.div>)}
+          {events.filter(event => event.kind !== 'system').map((event, index) => <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} key={event.id || index} className={`message ${event.kind} ${event.queued ? 'queued' : ''}`}>{event.kind === 'plan' ? <PlanCard event={event} canDecide={pendingPlansByChat.current.get(conversationId)?.planEventId === event.id} onApprove={() => approvePlan(conversationId, event.id)} onCancel={() => cancelPlan(conversationId, event.id)} translate={t} /> : <><div className="message-label"><span>{event.kind === 'user' ? event.queued ? t('You · queued', 'คุณ · อยู่ในคิว') : t('You', 'คุณ') : 'Codex'}</span><button onClick={() => api.copyText(event.text)} title={t('Copy message', 'คัดลอกข้อความ')}><Copy size={11} /></button></div><div className="markdown"><MarkdownMessage onOpenFile={openFileLink} text={event.text} /></div></>}</motion.div>)}
           {running && <div className="thinking"><i /><i /><i /></div>}
           <div ref={conversationEnd} className="conversation-end" />
         </div>
@@ -1285,7 +1412,7 @@ function App() {
             <div className="composer-options">
               <button className="attach-button" onClick={() => attachmentInput.current?.click()} disabled={attachmentBusy || attachments.length >= 4} title={t('Attach image or video', 'แนบรูปหรือวิดีโอ')}><Paperclip size={13} />{attachments.length > 0 && <b>{attachments.length}</b>}</button>
               <button className="permission" onClick={() => setAllowEdit(value => !value)}><span className={allowEdit ? 'enabled' : ''} />{allowEdit ? t('Workspace write', 'แก้ไขไฟล์ได้') : t('Read only', 'อ่านอย่างเดียว')}</button>
-              <button className="approval-mode" onClick={() => setApprovalMode(value => value === 'ask' ? 'auto' : 'ask')} title={t('Approval mode', 'รูปแบบการอนุมัติ')}><ShieldCheck size={13} />{approvalMode === 'ask' ? t('Ask first', 'ถามก่อน') : t('Automatic', 'อัตโนมัติ')}</button>
+              <button className="approval-mode" onClick={() => setApprovalMode(value => value === 'ask' ? 'auto' : 'ask')} title={t('Approval mode', 'รูปแบบการอนุมัติ')}><ShieldCheck size={13} />{approvalMode === 'ask' ? t('Plan first', 'สร้างแผนก่อน') : t('Automatic', 'อัตโนมัติ')}</button>
               <button className="model-chip" onClick={() => openSettings('model')} title={t('Choose model and reasoning', 'เลือกโมเดลและระดับการคิด')}><Brain size={13} />{settings.model ? settings.model.replace('gpt-', '') : 'Auto'} · {settings.reasoningEffort}</button>
             </div>
             <button className="send-button" onClick={() => void sendPrompt()} disabled={attachmentBusy || (!prompt.trim() && attachments.length === 0)}><Send size={15} /></button>

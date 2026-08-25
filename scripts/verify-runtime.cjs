@@ -36,6 +36,12 @@ const appSource = readFileSync(path.join(root, 'src', 'App.jsx'), 'utf8')
 if (appSource.includes('setInterval(() => void refreshWeeklyUsage')) {
   throw new Error('Weekly usage polling must not run continuously')
 }
+if (!mainSource.includes("ipcMain.handle('codex:plan'") || !mainSource.includes("ipcMain.handle('history:update-event'")) {
+  throw new Error('Plan generation or persisted plan tracking is missing')
+}
+if (!appSource.includes("['plan', 'plan_update', 'planUpdate', 'todo_list', 'todoList']")) {
+  throw new Error('Codex plan update events are not handled')
+}
 
 if (process.platform !== 'win32') process.exit(0)
 

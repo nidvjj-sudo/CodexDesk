@@ -679,10 +679,20 @@ async function restoreUndoSnapshot(id) {
 }
 
 function normalizeConversation(payload = {}, id = payload.conversationId || randomUUID()) {
-  const allowedKinds = new Set(['user', 'agent_message', 'output', 'error', 'system'])
+  const allowedKinds = new Set(['user', 'agent_message', 'output', 'error', 'system', 'plan'])
   const events = Array.isArray(payload.events) ? payload.events.slice(-300).flatMap(event => {
     if (!event || !allowedKinds.has(event.kind) || typeof event.text !== 'string') return []
-    return [{ id: typeof event.id === 'string' ? event.id : undefined, kind: event.kind, text: event.text.slice(0, 100000) }]
+    const normalized = { id: typeof event.id === 'string' ? event.id : undefined, kind: event.kind, text: event.text.slice(0, 100000) }
+    if (event.kind === 'plan') {
+      normalized.summary = typeof event.summary === 'string' ? event.summary.slice(0, 2000) : ''
+      normalized.status = ['generating', 'awaiting', 'running', 'completed', 'failed', 'cancelled'].includes(event.status) ? event.status : 'awaiting'
+      normalized.steps = Array.isArray(event.steps) ? event.steps.slice(0, 12).flatMap(step => {
+        if (!step || typeof step.text !== 'string' || !step.text.trim()) return []
+        const status = ['pending', 'in_progress', 'completed', 'failed'].includes(step.status) ? step.status : 'pending'
+        return [{ text: step.text.trim().slice(0, 500), status }]
+      }) : []
+    }
+    return [normalized]
   }) : []
   const sessionId = typeof payload.sessionId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(payload.sessionId) ? payload.sessionId : null
   const firstMessage = events.find(event => event.kind === 'user')?.text.trim()
@@ -1098,6 +1108,20 @@ ipcMain.handle('history:append', (_, payload = {}) => mutateHistory(async () => 
   await writeHistoryStore(store)
   return true
 }))
+ipcMain.handle('history:update-event', (_, payload = {}) => mutateHistory(async () => {
+  const store = await readHistoryStore()
+  const conversation = store.conversations.find(item => item.conversationId === payload.conversationId)
+  if (!conversation) return false
+  const event = normalizeConversation({ events: [payload.event] }).events[0]
+  if (!event?.id) return false
+  const index = conversation.events.findIndex(item => item.id === event.id)
+  if (index < 0) conversation.events.push(event)
+  else conversation.events[index] = event
+  conversation.events = conversation.events.slice(-300)
+  conversation.updatedAt = new Date().toISOString()
+  await writeHistoryStore(store)
+  return true
+}))
 ipcMain.handle('history:list', async () => {
   const store = await readHistoryStore()
   return store.conversations.slice().reverse().map(({ conversationId, title, updatedAt }) => ({ conversationId, title, updatedAt, active: conversationId === store.activeId }))
@@ -1285,6 +1309,85 @@ ipcMain.handle('update:state', () => updateState)
 ipcMain.handle('update:check', () => checkForUpdatesWithTimeout())
 ipcMain.handle('update:download', () => downloadUpdatePackage())
 ipcMain.handle('update:install', () => installDownloadedUpdate())
+ipcMain.handle('codex:plan', async (_, options = {}) => {
+  if (!projectRoot) throw new Error(uiText('No project is open.', 'ยังไม่ได้เปิดโปรเจกต์'))
+  const conversationId = typeof options.conversationId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(options.conversationId) ? options.conversationId : null
+  if (!conversationId) throw new Error(uiText('Invalid chat.', 'แชทไม่ถูกต้อง'))
+  if (codexProcesses.has(conversationId)) throw new Error(uiText('This chat is already working.', 'แชทนี้กำลังทำงานอยู่'))
+  const request = typeof options.prompt === 'string' ? options.prompt.trim().slice(0, 100000) : ''
+  if (!request) throw new Error(uiText('Enter a task first.', 'กรุณาพิมพ์งานก่อน'))
+  const attachments = await validateTaskAttachments(options.attachments)
+  const runtime = codexRuntime()
+  const schemaPath = path.join(app.getPath('temp'), `codexdesk-plan-${randomUUID()}.json`)
+  const schema = {
+    type: 'object',
+    properties: {
+      summary: { type: 'string' },
+      steps: { type: 'array', items: { type: 'string' } }
+    },
+    required: ['summary', 'steps'],
+    additionalProperties: false
+  }
+  await fs.writeFile(schemaPath, JSON.stringify(schema), 'utf8')
+  const prompt = [
+    'Analyze the current project and create a concise implementation plan for the user request.',
+    'Read files only. Do not edit, create, delete, install, or run commands that change state.',
+    'Return 2 to 8 concrete steps. Each step must describe a verifiable result.',
+    'Use the same language as the user request.',
+    attachments.length ? 'Inspect all attached images before planning.' : '',
+    '',
+    'User request:',
+    request
+  ].filter(Boolean).join('\n')
+  const args = [
+    ...runtime.prefix,
+    '--sandbox', 'read-only',
+    '--ask-for-approval', 'never',
+    'exec', '--json', '--ephemeral', '--skip-git-repo-check',
+    '--output-schema', schemaPath
+  ]
+  for (const file of attachments) args.push('--image', file)
+  args.push(prompt)
+  const child = spawn(runtime.file, args, { cwd: projectRoot, windowsHide: true, shell: false, env: runtime.env, stdio: ['ignore', 'pipe', 'pipe'] })
+  const task = { child, stopRequested: false, planning: true }
+  codexProcesses.set(conversationId, task)
+  updateDiscordActivity('thinking')
+  let output = ''
+  let diagnostics = ''
+  child.stdout.on('data', chunk => { output = (output + cleanProcessText(chunk)).slice(-200000) })
+  child.stderr.on('data', chunk => { diagnostics = (diagnostics + cleanProcessText(chunk)).slice(-12000) })
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = async (code, error = null) => {
+      if (settled) return
+      settled = true
+      await fs.rm(schemaPath, { force: true }).catch(() => {})
+      if (codexProcesses.get(conversationId) === task) codexProcesses.delete(conversationId)
+      if (!codexProcesses.size) updateDiscordActivity('ready')
+      if (error || code !== 0) {
+        reject(error || new Error(task.stopRequested ? uiText('Plan creation was cancelled.', 'ยกเลิกการสร้างแผนแล้ว') : explainCodexFailure(diagnostics)))
+        return
+      }
+      try {
+        let finalText = ''
+        for (const line of output.split(/\r?\n/).filter(Boolean)) {
+          try {
+            const event = JSON.parse(line)
+            if (event.type === 'item.completed' && event.item?.type === 'agent_message') finalText = event.item.text || finalText
+          } catch {}
+        }
+        const parsed = JSON.parse(finalText)
+        const steps = Array.isArray(parsed.steps) ? parsed.steps.map(value => String(value).trim()).filter(Boolean).slice(0, 8) : []
+        if (steps.length === 0) throw new Error('empty plan')
+        resolve({ summary: String(parsed.summary || request).trim().slice(0, 2000), steps })
+      } catch {
+        reject(new Error(uiText('Codex returned an invalid plan. Try again.', 'Codex ส่งแผนไม่ถูกต้อง กรุณาลองใหม่')))
+      }
+    }
+    child.on('error', error => void finish(-1, error))
+    child.on('close', code => void finish(code))
+  })
+})
 ipcMain.handle('codex:run', async (_, options) => {
   if (!projectRoot) throw new Error(uiText('No project is open.', 'ยังไม่ได้เปิดโปรเจกต์'))
   const conversationId = typeof options.conversationId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(options.conversationId) ? options.conversationId : null
@@ -1299,6 +1402,7 @@ ipcMain.handle('codex:run', async (_, options) => {
   const modeInstruction = options.allowEdit
     ? 'Edit only files inside the current project folder. Use MCP tools only as needed for the authorized task. Do not access unrelated data.'
     : 'Read and analyze only. Do not edit, create, or delete files. Do not use MCP tools that create, edit, or delete external data.'
+  const approvedPlan = Array.isArray(options.plan) ? options.plan.map(value => String(value).trim()).filter(Boolean).slice(0, 12) : []
   const prompt = [
     'Environment: Windows Server 2019.',
     'Do not use powershell.exe or PowerShell commands. Run executables directly, such as rg.exe and git.exe.',
@@ -1309,6 +1413,8 @@ ipcMain.handle('codex:run', async (_, options) => {
     settings.webSearch === 'disabled' ? 'Do not use web search.' : settings.webSearch === 'live' ? 'Use live web search whenever current information would improve accuracy.' : 'Use cached web search whenever external information would improve accuracy.',
     settings.customInstructions ? `Personal instructions from the user:\n${settings.customInstructions}` : '',
     'Always detect the language of the current user request and answer in that same language. If the request mixes languages, use the dominant language. This rule overrides any saved response-language preference. The application UI language must not affect the reply language.',
+    approvedPlan.length ? `The user approved this plan:\n${approvedPlan.map((step, index) => `${index + 1}. ${step}`).join('\n')}` : '',
+    approvedPlan.length ? 'Follow the approved plan through completion. Emit plan updates as steps start and finish. Keep exactly one step in progress at a time and verify the final result.' : '',
     '',
     'User request:',
     options.prompt
