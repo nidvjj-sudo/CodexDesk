@@ -1446,8 +1446,10 @@ ipcMain.handle('codex:plan', async (_, options = {}) => {
     '--output-schema', schemaPath
   ]
   for (const file of attachments) args.push('--image', file)
-  args.push(prompt)
-  const child = spawn(runtime.file, args, { cwd: projectRoot, windowsHide: true, shell: false, env: runtime.env, stdio: ['ignore', 'pipe', 'pipe'] })
+  args.push('-')
+  const child = spawn(runtime.file, args, { cwd: projectRoot, windowsHide: true, shell: false, env: runtime.env, stdio: ['pipe', 'pipe', 'pipe'] })
+  child.stdin.on('error', () => {})
+  child.stdin.end(prompt)
   const task = { child, stopRequested: false, planning: true }
   codexProcesses.set(conversationId, task)
   updateDiscordActivity('thinking')

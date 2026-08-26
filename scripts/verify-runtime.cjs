@@ -64,6 +64,9 @@ if (!mainSource.includes('remove every temporary artifact before finishing') || 
 if (!mainSource.includes('buildPlanProjectContext') || !mainSource.includes('do not run shell commands or tools to inspect the project again')) {
   throw new Error('Sandbox-safe project planning context is missing')
 }
+if (!mainSource.includes("args.push('-')") || !mainSource.includes("stdio: ['pipe', 'pipe', 'pipe']") || !mainSource.includes('child.stdin.end(prompt)')) {
+  throw new Error('Plan prompts must use stdin to avoid the Windows command-line length limit')
+}
 if (!appSource.includes('plan-live') || !appSource.includes('hasProgress') || !mainSource.includes('Never batch plan updates at the end')) {
   throw new Error('Live plan progress tracking is missing')
 }
